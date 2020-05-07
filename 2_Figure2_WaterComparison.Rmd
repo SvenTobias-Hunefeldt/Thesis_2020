@@ -1,0 +1,1353 @@
+---
+title: "Figure 2 - comparison to water"
+author: "Sven Tobias-Hunefeldt"
+date: "26/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script
+
+```{r load packages}
+
+library(ggpubr)
+library(vegan)
+library(ggplot2)
+library(Rmisc)
+library(phyloseq)
+library(tidyr)
+library(dplyr)
+library(RVAideMemoire)
+library(zetadiv)
+library(glm2)
+library(forcats)
+
+
+```
+```{r Refine colours and shapes}
+#Refine colours
+cbbPalette <- c("black",
+                "red",
+                "navy", 
+                "green", 
+                "magenta",
+                "forestgreen",
+                "turquoise")
+
+Time_colour_list = c("0" = "turquoise", 
+                     "7" = "forestgreen", 
+                     "14" = "black", 
+                     "19" = "red", 
+                     "28" = "navy", 
+                     "42" = "green", 
+                     "56" = "magenta")
+
+#Refine shape list
+Substrate_shape_list = c("Plastic" = 15, #Filled square 
+                         "Glass" = 16, #Filled circle
+                         "Tile" = 17, #Filled Triangle
+                         "Wood" = 5, #Hollow diamond
+                         "Water" = 11) #Lined star
+```
+
+
+#Prokaryotes
+##Figure 2 A
+###Plotting
+```{r}
+#Get pristine phyloseq object
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Refine phyloseq object by excluding mesh
+Phyloseq_Biofilm_16S = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Mesh")
+
+#Convert sample days from numeric to factor for easier plotting
+sample_data(Phyloseq_Biofilm_16S)$Sample_time<-as.numeric(as.character(sample_data(Phyloseq_Biofilm_16S)$Sample_time))
+
+#Reorder factors levels for best display
+sample_data(Phyloseq_Biofilm_16S)$Sample_time <- factor(sample_data(Phyloseq_Biofilm_16S)$Sample_time,
+                         levels=c("0", "7", "14", "19", "28", "42", "56"))
+#Substrate re-nameing
+sample_data(Phyloseq_Biofilm_16S)$Substrate = gsub("Acryl", "Plastic", sample_data(Phyloseq_Biofilm_16S)$Substrate)
+sample_data(Phyloseq_Biofilm_16S)$Substrate = gsub("Pine", "Wood", sample_data(Phyloseq_Biofilm_16S)$Substrate)
+
+sample_data(Phyloseq_Biofilm_16S)$Substrate <- factor(sample_data(Phyloseq_Biofilm_16S)$Substrate,
+                         levels=(unique(sample_data(Phyloseq_Biofilm_16S)$Substrate)))
+
+sample_data(Phyloseq_Biofilm_16S)$Substrate <- factor(sample_data(Phyloseq_Biofilm_16S)$Substrate,
+                         levels=c("Plastic", "Glass", "Tile", "Wood", "Water"))
+
+#Run ordination
+NMDS.ord_16S <- ordinate(Phyloseq_Biofilm_16S, method = "NMDS", distance = "bray")
+
+#Make stresspolot 
+stressplot(NMDS.ord_16S) #Good stressplot
+#Assess stress levl
+NMDS.ord_16S$stress #Good level of stress
+
+
+#Make plot
+NMDS_16S = plot_ordination(Phyloseq_Biofilm_16S, 
+                             NMDS.ord_16S, 
+                             shape = "Substrate", 
+                             color = "Sample_time"
+                             ) + 
+  theme(legend.position = "right")+
+  stat_ellipse(aes(group = Sample_time, lwd = 1))+
+  scale_color_manual("Time (days)", values = Time_colour_list)+
+  scale_shape_manual(values = Substrate_shape_list, breaks = c("Plastic", "Glass", "Tile", "Wood", "Water"))+
+  geom_point(aes(size = 6), show.legend = F)+
+  guides(colour = guide_legend(order = 2),
+         shape = guide_legend(order = 1))+
+  annotate("text", x=-3.5, y=3.5, size = 6, label= paste0("Stress = ", round(NMDS.ord_16S$stress, digits = 3)))+
+  theme_bw()+
+  My_Theme+
+  guides(colour = guide_legend(order = 1),
+         shape = guide_legend(order = 2, override.aes = list(size = 4)),
+         size = F)
+
+#Inspect plot
+NMDS_16S
+
+```
+###Statistical analysis
+```{r Set up}
+#Back up data as we will be making changes to it
+Phyloseq_Biofilm_16S_BU = Phyloseq_Biofilm_16S
+#Rename Water and Mesh biofilm stages
+Phyloseq_Biofilm_16S@sam_data$StageofBiofilm[grep("Mesh", Phyloseq_Biofilm_16S@sam_data$Substrate)] = "Mesh"
+Phyloseq_Biofilm_16S@sam_data$StageofBiofilm[grep("Water", Phyloseq_Biofilm_16S@sam_data$Substrate)] = "Water"
+Phyloseq_Biofilm_16S@sam_data
+
+#Subset to remove mesh samples
+Phyloseq_nomesh = subset_samples(Phyloseq_Biofilm_16S, Substrate!= "Mesh")
+Phyloseq_nomesh@sam_data
+
+
+```
+```{r 16S NMDS derived stat tests - StageofBiofilm}
+####anosim####
+Stage_group = get_variable(Phyloseq_nomesh@sam_data, "StageofBiofilm")
+anosim(phyloseq::distance(Phyloseq_nomesh, method = "bray"), Stage_group, distance = "bray")
+#0.001
+#0.7664
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Stage_group = get_variable(Phyloseq_nomesh@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh, method = "bray")
+adonis(df_tran.dist ~ Stage_group)
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.27201
+#p = 0.001
+
+####Pairwise PERMANOVA####
+Stage_group = get_variable(Phyloseq_nomesh@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh, method = "bray")
+Depth_ado = pairwise.perm.manova(df_tran.dist, Stage_group, nperm = 999, p.method = "bonferroni")
+Depth_ado
+
+```
+```{r Compared to early}
+Phyloseq_nomesh_early = subset_samples(Phyloseq_Biofilm_16S, Sample_time == "7" | Sample_time == "14" & Substrate!= "Mesh")
+Phyloseq_nomesh_early@sam_data
+
+####anosim####
+Stage_group = get_variable(Phyloseq_nomesh_early@sam_data, "StageofBiofilm")
+anosim(phyloseq::distance(Phyloseq_nomesh_early, method = "bray"), Stage_group, distance = "bray")
+#0.001
+#0.8343
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Stage_group = get_variable(Phyloseq_nomesh_early@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh_early, method = "bray")
+adonis(df_tran.dist ~ Stage_group)
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.13187
+#p = 0.001
+```
+```{r Compared to late}
+Phyloseq_nomesh_late = subset_samples(Phyloseq_Biofilm_16S, Sample_time == "19" | Sample_time == "28" | Sample_time == "42" | Sample_time == "56" & Substrate!= "Mesh")
+Phyloseq_nomesh_late@sam_data
+
+####anosim####
+Stage_group = get_variable(Phyloseq_nomesh_late@sam_data, "StageofBiofilm")
+anosim(phyloseq::distance(Phyloseq_nomesh_late, method = "bray"), Stage_group, distance = "bray")
+#0.001
+#0.5345
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Stage_group = get_variable(Phyloseq_nomesh_late@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh_late, method = "bray")
+adonis(df_tran.dist ~ Stage_group)
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.21566
+#p = 0.001
+```
+```{r Need to restore phyloseq object}
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_BU
+
+```
+##Figure 2 E
+###Plot associated code
+```{r Calculate and make plot}
+
+####Calculate and format ratio for plotting####
+#Subset samples
+Water_phyloseq = subset_samples(Phyloseq_Biofilm_16S, Substrate == "Water") #Extract water samples
+
+#Extract taxa table
+WaterTaxa_df = as.data.frame(as.matrix(Water_phyloseq@tax_table@.Data))
+keepTaxa_Water <- WaterTaxa_df$OTU #Extract the OTU table of the genera we care about
+  
+#Subset water organisms from biofilm dataset
+Twofold_Water <- subset_taxa(Phyloseq_Biofilm_16S_noA, OTU %in% keepTaxa_Water) #Subset the taxa by the Genus present in water
+
+#Make dataframes for downstream comparison
+dat_2fold_Water <- tax_glom(Twofold_Water, taxrank = 'Phylum') %>% #Merge the species at the Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt() #Melt it into a dataframe
+Water_df_Ab <- tax_glom(Water_phyloseq, taxrank = 'Phylum') %>% #Merge the species at the Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt()
+
+#Get summary from both water and biofilm abudnnaces (for the same organisms) for downstream comparison
+Water_Sum = summarySE(Water_df_Ab, measurevar = "Abundance", groupvars = c("Substrate", "Sample_time", "Mesh_status", "Kingdom", "Phylum"))
+Taxa_Sum = summarySE(dat_2fold_Water, measurevar = "Abundance", groupvars = c("Substrate", "Sample_time", "Mesh_status", "Kingdom", "Phylum"))
+
+#Check numbers
+nrow(Water_Sum)
+nrow(Taxa_Sum)
+
+#Calculate ratio
+y = 1
+i=1
+Results_df = data.frame() #Dataframe for results
+Taxa_Sum$Ratio = as.numeric(0) #Make new column to record ratio change
+for (i in 1:nrow(Taxa_Sum)) {
+  for (y in 1:nrow(Water_Sum)){
+  if (Taxa_Sum$Sample_time[i] == Water_Sum$Sample_time[y]) { #If time matches
+      if (Taxa_Sum$Phylum[i] == Water_Sum$Phylum[y]){ #If phylum matches
+        ratio = Taxa_Sum$Abundance[i]/Water_Sum$Abundance[y] #Calculate ratio
+        Taxa_Sum$Ratio[i] = ratio #Put ratio into new column
+        Results_df = rbind(Results_df, Taxa_Sum[i,]) #Bind updated row with ratio value into new results dataframe
+    }
+  y = y + 1
+  }
+  }
+  i = i + 1
+}
+
+#Add Rare taxa phylum to levels
+Results_df$Phylum <- factor(Results_df$Phylum,
+                         levels=c(paste0(unique(Results_df$Phylum)), "Rare Taxa <1%"))
+
+#Calculate rare taxa annd rename phyla in results dataframe if a phylum makes up < 0.01 % of the total abundance
+medians_Water <- ddply(Results_df, ~Phylum, function(x) c(median=mean(x$Abundance))) #Calculate mean abundance
+remainder_Water <- medians_Water[medians_Water$median <= 0.01,]$Phylum  # find Phyla whose rel. abund. is less than 1%
+Results_df[Results_df$Phylum %in% remainder_Water,]$Phylum <- 'Rare Taxa <1%' # change their name to "Rare Taxa"
+
+#Remove unknown ecological roles
+Ratio_df = subset(Results_df, !Phylum == "Rare Taxa" & !Phylum == "Incertae_Sedis_ph")
+Results_df<-dplyr::arrange(Ratio_df,Phylum, Abundance) #Arrange into easier to read order
+
+
+#write.csv(Ratio_df, file = "Ratio_Taxa_Recruit.csv") #Save for record keeping
+
+#Remove uneccesary factor levels
+Ratio_df$Phylum <- factor(Ratio_df$Phylum,
+                         levels=unique(Ratio_df$Phylum))
+
+#Add ecological role of phyla
+Ratio_df$Organism_type = as.factor("x")
+Ratio_df$Organism_type <- factor(Ratio_df$Organism_type,
+                         levels=c("Autotrophs", "Heterotrophs", "Mixotrophs", "Unknown"))
+Ratio_df$Organism_type[grep("Cyanobacteria", Ratio_df$Phylum)] = as.factor("Autotrophs")
+Ratio_df$Organism_type[grep("Epsilonbacteraeota", Ratio_df$Phylum)] = as.factor("Autotrophs")
+Ratio_df$Organism_type[grep("Bacteroidetes", Ratio_df$Phylum)] = as.factor("Heterotrophs")
+Ratio_df$Organism_type[grep("Verrucomicrobia", Ratio_df$Phylum)] = as.factor("Heterotrophs")
+Ratio_df$Organism_type[grep("Proteobacteria", Ratio_df$Phylum)] = as.factor("Mixotrophs")
+Ratio_df$Organism_type[grep("Rare Taxa <1%", Ratio_df$Phylum)] = as.factor("Unknown")
+Ratio_df$Organism_type[grep("Planctomycetes", Ratio_df$Phylum)] = as.factor("Unknown")
+
+#Check for weird names
+levels(Ratio_df$Phylum)
+
+#Remove Rare taxa
+Ratio_df = subset(Ratio_df, !Phylum == "Rare Taxa <1%")
+
+####Plotting####
+#Reorder time for logical sense
+Ratio_df$Sample_time = factor(Ratio_df$Sample_time,
+                         levels=c("7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+
+#Reorder enclosure status for logical sense
+Ratio_df$Mesh_status = gsub("Exposed", "Non-enclosed", Ratio_df$Mesh_status)
+Ratio_df$Mesh_status = factor(Ratio_df$Mesh_status,
+                         levels=c("Enclosed",
+                                  "Non-enclosed"))
+
+#Make plot
+Ratio_plot_16S <- ggplot(Ratio_df, 
+                        aes(x=Sample_time, 
+                            y=Ratio, 
+                            colour = fct_reorder(Phylum, Ratio, .fun = mean, .desc = T),
+                            group = Phylum,
+                            linetype = Organism_type))+ 
+  geom_line(stat = "identity", lwd = 1) + 
+  geom_errorbar(aes(ymin=(Ratio-se), 
+                    ymax=(Ratio+se), 
+                    colour = Phylum),
+                position=pd
+                )+
+  xlab("Time (days)")+ 
+  ylab("Ratio change compared to water")+
+  scale_colour_manual("Prokaryotes", values = Phylum_colour_list)+
+  scale_y_log10(limits = c(0.1, 35), breaks = c(0.01, 0.1, 1, 10))+
+  facet_grid(Substrate ~ Mesh_status)+
+  scale_linetype_manual("Organism type", values = c("solid", "dotted", "dashed", "twodash"))+
+  theme_bw()+
+  My_Theme+
+  ggtitle("Prokaryotes")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "right")+
+  guides(linetype = guide_legend(order = 1),
+         colour = guide_legend(order = 2))
+  
+#Display plot
+Ratio_plot_16S
+#saveRDS(Ratio_plot_16S, "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/Ratio_WaterRecruitment_16S.rds")
+
+
+```
+```{r Mean early community ratio increases}
+Mean_Ratio_df_Cyano = subset(Ratio_df, Phylum == "Cyanobacteria")
+Mean_Ratio_df_Bact = subset(Ratio_df, Phylum == "Bacteroidetes")
+Mean_Ratio_df_Plancto = subset(Ratio_df, Phylum == "Planctomycetes")
+Mean_Ratio_df_Verru = subset(Ratio_df, Phylum == "Verrucomicrobia")
+Mean_Ratio_df = rbind(Mean_Ratio_df_Cyano, Mean_Ratio_df_Bact, Mean_Ratio_df_Plancto, Mean_Ratio_df_Verru)
+
+Mean_Ratio_df_D7 = subset(Mean_Ratio_df,  Sample_time == "7")
+Mean_Ratio_df_D14 = subset(Mean_Ratio_df, Sample_time == "14")
+Mean_Ratio_df = rbind(Mean_Ratio_df_D7, Mean_Ratio_df_D14)
+
+Summary_mean_df = summarySE(Mean_Ratio_df, measurevar = "Ratio", groupvars = c("Phylum"))
+Summary_mean_df
+
+```
+###How much biofilm abundance accounted for by water ASVs
+```{r Identify all OTUs present in biofilm}
+
+#Start with pristine phyloseq object
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+sum(taxa_sums(Phyloseq_Biofilm_16S_noA) < 1) #How many below 1?
+Phyloseq_Biofilm_16S_noA = prune_taxa(taxa_sums(Phyloseq_Biofilm_16S_noA) > 1, Phyloseq_Biofilm_16S_noA)
+sum(taxa_sums(Phyloseq_Biofilm_16S_noA) < 1) #How many below 1?
+
+Sample_counts <- transform_sample_counts(Phyloseq_Biofilm_16S_noA, function(x) x/sum(x)) %>% #Get abundance in %
+  tax_glom(taxrank = "OTU") %>% #Agglomerate taxa
+  psmelt() #Create dataframe from phyloseq object()
+
+# agglomerate taxa
+#glom <- tax_glom(Sample_counts, taxrank = 'OTU')
+
+# create dataframe from phyloseq object
+#dat <- psmelt(glom)
+
+# convert OTU to a character vector from a factor because R
+Sample_counts$OTU <- as.character(Sample_counts$OTU)
+
+#Save as back up 
+#Sample_counts_v0 = Sample_counts
+
+#Restore from back up
+Sample_counts = Sample_counts_v0
+
+```
+```{r Extract water ASVs}
+
+Water_phyloseq = subset_samples(Phyloseq_Biofilm_16S, Substrate == "Water") #Extract water samples
+
+sum(taxa_sums(Water_phyloseq) < 1) #How many below 1?
+Water_phyloseq = prune_taxa(taxa_sums(Water_phyloseq) > 1, Water_phyloseq)
+sum(taxa_sums(Phyloseq_Biofilm_16S_noA) < 1) #How many below 1?
+
+Water_df <- transform_sample_counts(Water_phyloseq, function(x) x/sum(x)) %>% #Get abundance in %
+  tax_glom(taxrank = "OTU") %>% #Agglomerate taxa
+  psmelt() #Create dataframe from phyloseq object()
+
+#Water_df_v0 = Water_df
+Water_df = Water_df_v0
+
+Water_df$Abundance[grep(NaN, Water_df$Abundance)] = 0
+
+unique(Water_df$OTU)
+
+
+WaterTaxa_df = as.data.frame(as.matrix(Water_phyloseq@tax_table@.Data))
+keepTaxa_Water <- WaterTaxa_df$OTU #Extract the OTU table of the genera we care about
+#keepme = unique(levels(WaterTaxa_df$OTU))
+```
+```{r}
+
+#Convert to character, as R
+Significant_taxa <- as.character(keepTaxa_Water)
+#Significant_taxa = append(Significant_taxa, "Retained")
+unique(unique(Sample_counts$OTU) %in%
+unique(Significant_taxa))
+
+#Change the name of the significant organisms
+Sample_counts[Sample_counts$OTU %in% Significant_taxa,]$OTU <- "Retained"
+unique(Sample_counts$OTU)
+unique(Significant_taxa)
+unique(Sample_counts_v0$OTU)
+
+
+
+#Extract the significant organisms into a new df
+Significant_df = subset(Sample_counts, OTU == "Retained")
+
+#Make a function the opposite of %in%
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+#Rename the non-significant organisms
+Sample_counts[Sample_counts$OTU %!in% Significant_taxa,]$OTU <- 'New'
+
+unique(Sample_counts$OTU)
+#Extract the non-significant organisms
+Nonsignificant_df = subset(Sample_counts, OTU == "New")
+
+#Merge the significant and non-significant dfs together
+plotsign.vs.nonSign = rbind(Nonsignificant_df, Significant_df)
+
+#Plot
+plotme = ggplot(plotsign.vs.nonSign,
+       aes(x = OTU, y = (..count..)/sum(..count..)), stat = "count") + 
+  geom_bar() +
+  ylab("Taxonomic abundance of ASVs (%)")+
+  scale_y_continuous(labels = scales::percent)+
+  xlab("")+
+  scale_x_discrete(labels=c("Retained" = "Retained from \nwater", "New" = "Unique to \nBiofilm"))+
+  theme_bw()+
+  My_Theme
+
+plotme
+
+#How many significant vs. non-significant?
+ExtractNum = summary(as.factor(plotsign.vs.nonSign$OTU))
+New_ASVs = as.numeric(as.character(ExtractNum["New"]))
+Retained_ASVs = as.numeric(as.character(ExtractNum["Retained"]))
+
+Total = New_ASVs + Retained_ASVs
+
+#Percentage of ASVs unique to biofilm
+print((New_ASVs/Total)*100)
+
+#Percentage of ASVs retained from water
+print((Retained_ASVs/Total)*100)
+
+```
+
+#Eukaryotes
+##Figure 2 B
+###Plotting
+```{r}
+#Get pristine phyloseq object
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Refine phyloseq object by excluding mesh
+Phyloseq_Biofilm_18S = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Mesh")
+
+#Convert sample days from numeric to factor for easier plotting
+sample_data(Phyloseq_Biofilm_18S)$Sample_time<-as.numeric(as.character(sample_data(Phyloseq_Biofilm_18S)$Sample_time))
+
+#Reorder factors levels for best display
+sample_data(Phyloseq_Biofilm_18S)$Sample_time <- factor(sample_data(Phyloseq_Biofilm_18S)$Sample_time,
+                         levels=c("0", "7", "14", "19", "28", "42", "56"))
+
+#Substrate re-nameing
+sample_data(Phyloseq_Biofilm_18S)$Substrate = gsub("Acryl", "Plastic", sample_data(Phyloseq_Biofilm_18S)$Substrate)
+sample_data(Phyloseq_Biofilm_18S)$Substrate = gsub("Pine", "Wood", sample_data(Phyloseq_Biofilm_18S)$Substrate)
+
+sample_data(Phyloseq_Biofilm_18S)$Substrate <- factor(sample_data(Phyloseq_Biofilm_18S)$Substrate,
+                         levels=(unique(sample_data(Phyloseq_Biofilm_18S)$Substrate)))
+
+sample_data(Phyloseq_Biofilm_18S)$Substrate <- factor(sample_data(Phyloseq_Biofilm_18S)$Substrate,
+                         levels=c("Plastic", "Glass", "Tile", "Wood", "Water"))
+
+#Run ordination
+NMDS.ord_18S <- ordinate(Phyloseq_Biofilm_18S, method = "NMDS", distance = "bray")
+
+#Make stresspolot 
+stressplot(NMDS.ord_18S) #Good stressplot
+#Assess stress levl
+NMDS.ord_18S$stress #Good level of stress
+
+
+#Make plot
+NMDS_18S = plot_ordination(Phyloseq_Biofilm_18S, 
+                             NMDS.ord_18S, 
+                             shape = "Substrate", 
+                             color = "Sample_time"
+                             ) + 
+  theme(legend.position = "right")+
+  stat_ellipse(aes(group = Sample_time, lwd = 1))+
+  scale_color_manual("Time (days)", values = Time_colour_list)+
+  scale_shape_manual(values = Substrate_shape_list, breaks = c("Plastic", "Glass", "Tile", "Wood", "Water"))+
+  geom_point(aes(size = 6), show.legend = F)+
+  guides(colour = guide_legend(order = 2),
+         shape = guide_legend(order = 1))+
+  annotate("text", x=-0.4, y=1, size = 6, label= paste0("Stress = ", round(NMDS.ord_18S$stress, digits = 3)))+
+  theme_bw()+
+  My_Theme+
+  guides(colour = guide_legend(order = 1),
+         shape = guide_legend(order = 2, override.aes = list(size = 4)),
+         size = F)
+
+#Inspect plot
+NMDS_18S
+```
+
+###Statistical analysis - need to run and get numbers
+```{r Set up}
+#Back up data as we will be making changes to it
+Phyloseq_Biofilm_18S_BU = Phyloseq_Biofilm_18S
+#Rename Water and Mesh biofilm stages
+Phyloseq_Biofilm_18S@sam_data$StageofBiofilm[grep("Mesh", Phyloseq_Biofilm_18S@sam_data$Substrate)] = "Mesh"
+Phyloseq_Biofilm_18S@sam_data$StageofBiofilm[grep("Water", Phyloseq_Biofilm_18S@sam_data$Substrate)] = "Water"
+Phyloseq_Biofilm_18S@sam_data
+
+#Subset to remove mesh samples
+Phyloseq_nomesh = subset_samples(Phyloseq_Biofilm_18S, Substrate!= "Mesh")
+Phyloseq_nomesh@sam_data
+
+
+```
+```{r 18S NMDS derived stat tests - StageofBiofilm}
+####anosim####
+Stage_group = get_variable(Phyloseq_nomesh@sam_data, "StageofBiofilm")
+anosim(phyloseq::distance(Phyloseq_nomesh, method = "bray"), Stage_group, distance = "bray")
+#0.001
+#0.6356
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Stage_group = get_variable(Phyloseq_nomesh@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh, method = "bray")
+adonis(df_tran.dist ~ Stage_group)
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.13462
+#p = 0.001
+
+####Pairwise PERMANOVA####
+Stage_group = get_variable(Phyloseq_nomesh@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh, method = "bray")
+Depth_ado = pairwise.perm.manova(df_tran.dist, Stage_group, nperm = 999, p.method = "bonferroni")
+Depth_ado
+
+```
+```{r Compared to early}
+Phyloseq_nomesh_early = subset_samples(Phyloseq_Biofilm_18S, Sample_time == "7" | Sample_time == "14" & Substrate!= "Mesh")
+Phyloseq_nomesh_early@sam_data
+
+####anosim####
+Stage_group = get_variable(Phyloseq_nomesh_early@sam_data, "StageofBiofilm")
+anosim(phyloseq::distance(Phyloseq_nomesh_early, method = "bray"), Stage_group, distance = "bray")
+#0.001
+#0.5583
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Stage_group = get_variable(Phyloseq_nomesh_early@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh_early, method = "bray")
+adonis(df_tran.dist ~ Stage_group)
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.20681
+#p = 0.001
+```
+```{r Compared to late}
+Phyloseq_nomesh_late = subset_samples(Phyloseq_Biofilm_18S, Sample_time == "19" | Sample_time == "28" | Sample_time == "42" | Sample_time == "56" & Substrate!= "Mesh")
+Phyloseq_nomesh_late@sam_data
+
+####anosim####
+Stage_group = get_variable(Phyloseq_nomesh_late@sam_data, "StageofBiofilm")
+anosim(phyloseq::distance(Phyloseq_nomesh_late, method = "bray"), Stage_group, distance = "bray")
+#0.001
+#0.4526
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Stage_group = get_variable(Phyloseq_nomesh_late@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_nomesh_late, method = "bray")
+adonis(df_tran.dist ~ Stage_group)
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.06173
+#p = 0.001
+```
+```{r Need to restore phyloseq object}
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_BU
+
+```
+##Figure 2 F
+```{r Calculate and make plot}
+
+####Calculate and format ratio for plotting####
+#Subset samples
+Water_phyloseq = subset_samples(Phyloseq_Biofilm_18S, Substrate == "Water") #Extract water samples
+
+#Extract taxa table
+WaterTaxa_df = as.data.frame(as.matrix(Water_phyloseq@tax_table@.Data))
+keepTaxa_Water <- WaterTaxa_df$OTU #Extract the OTU table of the genera we care about
+  
+#Subset water organisms from biofilm dataset
+Twofold_Water <- subset_taxa(Phyloseq_Biofilm_18S_noA, OTU %in% keepTaxa_Water) #Subset the taxa by the Genus present in water
+
+#Make dataframes for downstream comparison
+dat_2fold_Water <- tax_glom(Twofold_Water, taxrank = 'Phylum') %>% #Merge the species at the Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt() #Melt it into a dataframe
+Water_df_Ab <- tax_glom(Water_phyloseq, taxrank = 'Phylum') %>% #Merge the species at the Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt()
+
+#Get summary from both water and biofilm abudnnaces (for the same organisms) for downstream comparison
+Water_Sum = summarySE(Water_df_Ab, measurevar = "Abundance", groupvars = c("Substrate", "Sample_time", "Mesh_status", "Kingdom", "Phylum"))
+Taxa_Sum = summarySE(dat_2fold_Water, measurevar = "Abundance", groupvars = c("Substrate", "Sample_time", "Mesh_status", "Kingdom", "Phylum"))
+
+#Check numbers
+nrow(Water_Sum)
+nrow(Taxa_Sum)
+
+#Calculate ratio
+y = 1
+i=1
+Results_df = data.frame() #Dataframe for results
+Taxa_Sum$Ratio = as.numeric(0) #Make new column to record ratio change
+for (i in 1:nrow(Taxa_Sum)) {
+  for (y in 1:nrow(Water_Sum)){
+  if (Taxa_Sum$Sample_time[i] == Water_Sum$Sample_time[y]) { #If time matches
+      if (Taxa_Sum$Phylum[i] == Water_Sum$Phylum[y]){ #If phylum matches
+        ratio = Taxa_Sum$Abundance[i]/Water_Sum$Abundance[y] #Calculate ratio
+        Taxa_Sum$Ratio[i] = ratio #Put ratio into new column
+        Results_df = rbind(Results_df, Taxa_Sum[i,]) #Bind updated row with ratio value into new results dataframe
+    }
+  y = y + 1
+  }
+  }
+  i = i + 1
+}
+
+#Add Rare taxa phylum to levels
+Results_df$Phylum <- factor(Results_df$Phylum,
+                         levels=c(paste0(unique(Results_df$Phylum)), "Rare Taxa <1%"))
+
+#Calculate rare taxa annd rename phyla in results dataframe if a phylum makes up < 0.01 % of the total abundance
+medians_Water <- ddply(Results_df, ~Phylum, function(x) c(median=mean(x$Abundance))) #Calculate mean abundance
+remainder_Water <- medians_Water[medians_Water$median <= 0.01,]$Phylum  # find Phyla whose rel. abund. is less than 1%
+Results_df[Results_df$Phylum %in% remainder_Water,]$Phylum <- 'Rare Taxa <1%' # change their name to "Rare Taxa"
+
+#Remove unknown ecological roles
+Ratio_df = subset(Results_df, !Phylum == "Rare Taxa" & !Phylum == "Incertae_Sedis_ph")
+Results_df<-dplyr::arrange(Ratio_df,Phylum, Abundance) #Arrange into easier to read order
+
+
+#write.csv(Ratio_df, file = "Ratio_Taxa_Recruit.csv") #Save for record keeping
+
+#Remove uneccesary factor levels
+Ratio_df$Phylum <- factor(Ratio_df$Phylum,
+                         levels=unique(Ratio_df$Phylum))
+
+#Add ecological role of phyla
+Ratio_df$Organism_type = as.factor("x")
+Ratio_df$Organism_type <- factor(Ratio_df$Organism_type,
+                         levels=c("Autotrophs", "Heterotrophs", "Mixotrophs", "Unknown"))
+Ratio_df$Organism_type[grep("Ochrophyta", Ratio_df$Phylum)] = as.factor("Autotrophs")
+Ratio_df$Organism_type[grep("Florideophycidae", Ratio_df$Phylum)] = as.factor("Autotrophs")
+#Ratio_df$Organism_type[grep("Ochrophyta", Ratio_df$Phylum)] = as.factor("Primary_Producers")
+
+Ratio_df$Organism_type[grep("Ciliophora", Ratio_df$Phylum)] = as.factor("Heterotrophs")
+Ratio_df$Organism_type[grep("Arthropoda", Ratio_df$Phylum)] = as.factor("Heterotrophs")
+Ratio_df$Organism_type[grep("Nematoda", Ratio_df$Phylum)] = as.factor("Heterotrophs")
+
+Ratio_df$Organism_type[grep("Euglenozoa", Ratio_df$Phylum)] = as.factor("Mixotrophs")
+
+Ratio_df$Organism_type[grep("RareTaxa", Ratio_df$Phylum)] = as.factor("Unknown")
+Ratio_df$Organism_type[grep("Incertae_Sedis_ph", Ratio_df$Phylum)] = as.factor("Unknown")
+
+#Check for weird names
+levels(Ratio_df$Phylum)
+
+#Remove Rare taxa
+Ratio_df = subset(Ratio_df, !Phylum == "Rare Taxa <1%")
+
+####Plotting####
+#Reorder time for logical sense
+Ratio_df$Sample_time = factor(Ratio_df$Sample_time,
+                         levels=c("7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+
+#Reorder enclosure status for logical sense
+Ratio_df$Mesh_status = gsub("Exposed", "Non-enclosed", Ratio_df$Mesh_status)
+Ratio_df$Mesh_status = factor(Ratio_df$Mesh_status,
+                         levels=c("Enclosed",
+                                  "Non-enclosed"))
+#Make plot
+Ratio_plot_18S <- ggplot(Ratio_df, 
+                        aes(x=Sample_time, 
+                            y=Ratio, 
+                            colour = fct_reorder(Phylum, Ratio, .fun = mean, .desc = T),
+                            group = Phylum,
+                            linetype = Organism_type))+ 
+  geom_line(stat = "identity", lwd = 1) + 
+  geom_errorbar(aes(ymin=(Ratio-se), 
+                    ymax=(Ratio+se), 
+                    colour = Phylum),
+                position=pd
+                )+
+  xlab("Time (days)")+ 
+  ylab("Ratio change compared to water")+
+  scale_colour_manual("Eukaryotes", values = Phylum_colour_list)+
+  scale_y_log10(limits = c(0.1, 35), breaks = c(0.01, 0.1, 1, 10))+
+  facet_grid(Substrate ~ Mesh_status)+
+  scale_linetype_manual("Organism type", values = c("solid", "dotted", "dashed", "twodash"))+
+  theme_bw()+
+  My_Theme+
+  ggtitle("Eukaryotes")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(legend.position = "right")+
+  guides(linetype = F,
+         colour = guide_legend(order = 1))
+  
+#Display plot
+Ratio_plot_18S
+#saveRDS(Ratio_plot_18S, "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/Ratio_WaterRecruitment_18S.rds")
+
+
+```
+```{r Mean early community ratio increases}
+
+Mean_Ratio_df_Cili = subset(Ratio_df, Phylum == "Ciliophora")
+Mean_Ratio_df_Flori = subset(Ratio_df, Phylum == "Florideophycidae")
+Mean_Ratio_df = rbind(Mean_Ratio_df_Cili, Mean_Ratio_df_Flori)
+
+Mean_Ratio_df = subset(Mean_Ratio_df,  Sample_time == "7")
+
+Summary_mean_df = summarySE(Mean_Ratio_df, measurevar = "Ratio", groupvars = c("Phylum"))
+Summary_mean_df
+```
+###How much biofilm abundance accounted for by water ASVs
+```{r Identify all OTUs present in biofilm}
+
+#Start with pristine phyloseq object
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+sum(taxa_sums(Phyloseq_Biofilm_18S_noA) < 1) #How many below 1?
+Phyloseq_Biofilm_18S_noA = prune_taxa(taxa_sums(Phyloseq_Biofilm_18S_noA) > 1, Phyloseq_Biofilm_18S_noA)
+sum(taxa_sums(Phyloseq_Biofilm_18S_noA) < 1) #How many below 1?
+
+Sample_counts <- transform_sample_counts(Phyloseq_Biofilm_18S_noA, function(x) x/sum(x)) %>% #Get abundance in %
+  tax_glom(taxrank = "OTU") %>% #Agglomerate taxa
+  psmelt() #Create dataframe from phyloseq object()
+
+# agglomerate taxa
+#glom <- tax_glom(Sample_counts, taxrank = 'OTU')
+
+# create dataframe from phyloseq object
+#dat <- psmelt(glom)
+
+# convert OTU to a character vector from a factor because R
+Sample_counts$OTU <- as.character(Sample_counts$OTU)
+
+#Save as back up 
+Sample_counts_v0 = Sample_counts
+
+#Restore from back up
+Sample_counts = Sample_counts_v0
+
+```
+```{r Extract water ASVs}
+
+Water_phyloseq = subset_samples(Phyloseq_Biofilm_18S, Substrate == "Water") #Extract water samples
+
+sum(taxa_sums(Water_phyloseq) < 1) #How many below 1?
+Water_phyloseq = prune_taxa(taxa_sums(Water_phyloseq) > 1, Water_phyloseq)
+sum(taxa_sums(Phyloseq_Biofilm_18S_noA) < 1) #How many below 1?
+
+Water_df <- transform_sample_counts(Water_phyloseq, function(x) x/sum(x)) %>% #Get abundance in %
+  tax_glom(taxrank = "OTU") %>% #Agglomerate taxa
+  psmelt() #Create dataframe from phyloseq object()
+
+#Water_df_v0 = Water_df
+Water_df = Water_df_v0
+
+Water_df$Abundance[grep(NaN, Water_df$Abundance)] = 0
+
+unique(Water_df$OTU)
+
+
+WaterTaxa_df = as.data.frame(as.matrix(Water_phyloseq@tax_table@.Data))
+keepTaxa_Water <- WaterTaxa_df$OTU #Extract the OTU table of the genera we care about
+#keepme = unique(levels(WaterTaxa_df$OTU))
+```
+```{r Calculate and plot}
+
+#Convert to character, as R
+Significant_taxa <- as.character(keepTaxa_Water)
+#Significant_taxa = append(Significant_taxa, "Retained")
+unique(unique(Sample_counts$OTU) %in%
+unique(Significant_taxa))
+
+#Change the name of the significant organisms
+Sample_counts[Sample_counts$OTU %in% Significant_taxa,]$OTU <- "Retained"
+unique(Sample_counts$OTU)
+unique(Significant_taxa)
+unique(Sample_counts_v0$OTU)
+
+
+
+#Extract the significant organisms into a new df
+Significant_df = subset(Sample_counts, OTU == "Retained")
+
+#Make a function the opposite of %in%
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+#Rename the non-significant organisms
+Sample_counts[Sample_counts$OTU %!in% Significant_taxa,]$OTU <- 'New'
+
+unique(Sample_counts$OTU)
+#Extract the non-significant organisms
+Nonsignificant_df = subset(Sample_counts, OTU == "New")
+
+#Merge the significant and non-significant dfs together
+plotsign.vs.nonSign = rbind(Nonsignificant_df, Significant_df)
+
+#Plot
+plotme = ggplot(plotsign.vs.nonSign,
+       aes(x = OTU, y = (..count..)/sum(..count..)), stat = "count") + 
+  geom_bar() +
+  ylab("Taxonomic abundance of ASVs (%)")+
+  scale_y_continuous(labels = scales::percent)+
+  xlab("")+
+  scale_x_discrete(labels=c("Retained" = "Retained from \nwater", "New" = "Unique to \nBiofilm"))+
+  theme_bw()+
+  My_Theme
+
+plotme
+
+#How many significant vs. non-significant?
+ExtractNum = summary(as.factor(plotsign.vs.nonSign$OTU))
+New_ASVs = as.numeric(as.character(ExtractNum["New"]))
+Retained_ASVs = as.numeric(as.character(ExtractNum["Retained"]))
+
+Total = New_ASVs + Retained_ASVs
+
+#Percentage of ASVs unique to biofilm
+print((New_ASVs/Total)*100)
+
+#Percentage of ASVs retained from water
+print((Retained_ASVs/Total)*100)
+
+```
+
+#Figure 2 C-D
+```{r Extract and run prokayotic comparisons}
+#Get pristine verison of phyloseq
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_16S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_16S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_16S.csv")
+
+```
+```{r Reformat prokaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T | grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_16S_v0 = Temporary_df
+Temporary_df_16S = Temporary_df_16S_v0
+```
+```{r Extract and run eukaryotic comparisons}
+#Get pristine verison of phyloseq
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_18S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_18S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_18S.csv")
+
+```
+```{r Reformat eukaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("2", Temporary_df$Var1[i]) == T | grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_18S_v0 = Temporary_df
+Temporary_df_18S = Temporary_df_18S_v0
+```
+```{r Combine prokaryotic and eukaryotic comparisons}
+Temporary_df_16S_v0$Sequencing = as.factor("Prokaryotes")
+Temporary_df_18S_v0$Sequencing = as.factor("Eukaryotes")
+
+Temporary_df = rbind(Temporary_df_16S_v0, Temporary_df_18S_v0)
+Temporary_df_v0 = Temporary_df
+
+
+```
+```{r Subset to comparisons needed and plot}
+#Subset to useable ones
+Temporary_df = subset(Temporary_df_v0, 
+                      Substrate!= "Mesh")
+
+#Subset to only those comparing water to other communities
+Temporary_df_2 = data.frame()
+y = 1
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("am", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("ae", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("gm", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("ge", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("pm", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("pe", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("tm", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+} else if (grepl("te", Temporary_df$Var1[i]) == T && grepl("ws", Temporary_df$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df[i,])
+  y = y+1
+}
+  i=i+1
+}
+
+#Make sure it worked
+Temporary_df_2
+
+
+#Subset to only those comparing time to time, with no cross time comaprisons
+Temporary_df_2.1 = data.frame()
+y = 1
+for (i in 1:nrow(Temporary_df_2)) {
+if (grepl("1", Temporary_df_2$Var1[i]) == T && grepl("1", Temporary_df_2$Var2[i]) == T){
+  Temporary_df_2.1 = rbind(Temporary_df_2.1, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("2", Temporary_df_2$Var1[i]) == T && grepl("2", Temporary_df_2$Var2[i]) == T){
+  Temporary_df_2.1 = rbind(Temporary_df_2.1, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("3", Temporary_df_2$Var1[i]) == T && grepl("3", Temporary_df_2$Var2[i]) == T){
+  Temporary_df_2.1 = rbind(Temporary_df_2.1, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("4", Temporary_df_2$Var1[i]) == T && grepl("4", Temporary_df_2$Var2[i]) == T){
+  Temporary_df_2.1 = rbind(Temporary_df_2.1, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("5", Temporary_df_2$Var1[i]) == T && grepl("5", Temporary_df_2$Var2[i]) == T){
+  Temporary_df_2.1 = rbind(Temporary_df_2.1, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("6", Temporary_df_2$Var1[i]) == T && grepl("6", Temporary_df_2$Var2[i]) == T){
+  Temporary_df_2.1 = rbind(Temporary_df_2.1, Temporary_df_2[i,])
+  y = y+1
+} 
+  i=i+1
+}
+
+#Make sure it worked
+Temporary_df_2.1
+
+#Summarise for plotting
+Temporary_df_2 = summarySE(Temporary_df_2.1, measurevar="Bray_dissimilarity", groupvars=c("Sample_time", "Sequencing", "StageofBiofilm"))
+
+Temporary_df_2$Sequencing = factor(Temporary_df_2$Sequencing,
+                                   levels = unique(c("Prokaryotes", "Eukaryotes")))
+Temporary_df_2$Mesh_status = factor(Temporary_df_2$Mesh_status,
+                                   levels = unique(c("Enclosed", "Non-enclosed")))
+Temporary_df_2$Sample_time = factor(Temporary_df_2$Sample_time, 
+                                      levels = c(7,14,19,28,42,56))
+
+#Subset for cleaner downstream plotting
+Temporary_df_2_16S = subset(Temporary_df_2, Sequencing == "Prokaryotes")
+Temporary_df_2_18S = subset(Temporary_df_2, Sequencing == "Eukaryotes")
+
+#Plot
+Plot_bray_16S = ggplot(Temporary_df_2_16S, aes(x= Sample_time, y = Bray_dissimilarity, group = Sequencing)) + 
+  geom_line(lwd =1)+
+      geom_errorbar(aes(ymin=(Bray_dissimilarity-se), 
+                    ymax=(Bray_dissimilarity+se)),
+                position=pd)+
+  facet_grid(. ~ Sequencing)+
+  #scale_color_manual("Condition", values = cbbPalette)+
+  xlab("Time (days)")+
+  ylab("Bray-Curtis dissimilarity")+
+  theme_bw()+
+  My_Theme
+
+Plot_bray_16S
+
+#Plot
+Plot_bray_18S = ggplot(Temporary_df_2_18S, aes(x= Sample_time, y = Bray_dissimilarity, group = Sequencing)) + 
+  geom_line(lwd = 1)+
+      geom_errorbar(aes(ymin=(Bray_dissimilarity-se), 
+                    ymax=(Bray_dissimilarity+se)),
+                position=pd)+
+  facet_grid(. ~ Sequencing)+
+  #scale_color_manual("Condition", values = cbbPalette)+
+  xlab("Time (days)")+
+  ylab("Bray-Curtis dissimilarity")+
+  theme_bw()+
+  My_Theme
+
+Plot_bray_18S
+```
+```{r Calculate means}
+#Mean difference between prokaryotes and eukaryotes
+test_mean = Temporary_df_2.1 %>% 
+  group_by(Sequencing) %>% 
+  dplyr::summarise(mean_val = mean(Bray_dissimilarity ), sd = sd(Bray_dissimilarity ))
+print(test_mean)
+
+#Mean prokaryote and eukaryote differences over developmental stages
+test_mean = Temporary_df_2.1 %>% 
+  group_by(Sequencing, StageofBiofilm) %>% 
+  dplyr::summarise(mean_val = mean(Bray_dissimilarity ), sd = sd(Bray_dissimilarity ))
+print(test_mean)
+
+#Mean prokaryote and eukaryote differences over time
+test_mean = Temporary_df_2.1 %>% 
+  group_by(Sample_time, Sequencing) %>% 
+  dplyr::summarise(mean_val = mean(Bray_dissimilarity ), sd = sd(Bray_dissimilarity ))
+print(test_mean)
+
+#Difference between D7 and D56
+test_mean$mean_val[9]-test_mean$mean_val[11] #Prokaryotes
+test_mean$mean_val[10]-test_mean$mean_val[12] #Eukaryotes
+
+#Eukaryotic dissimilarity changes
+test_mean$mean_val[4]-test_mean$mean_val[2] #Day 14 to 19
+test_mean$mean_val[6]-test_mean$mean_val[4] #Day 19 to 28
+test_mean$sd[11]/test_mean$mean_val[11]
+test_mean$sd[12]/test_mean$mean_val[12]
+(test_mean$sd[12]/test_mean$mean_val[12])/(test_mean$sd[11]/test_mean$mean_val[11])
+
+```
+```{r Statistical significance}
+
+wilcox.test(Temporary_df_2.1$Bray_dissimilarity ~ Temporary_df_2.1$Mesh_status, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1$Bray_dissimilarity, Temporary_df_2.1$Sample_time, p.adjust.method = "bonferroni")
+wilcox.test(Temporary_df_2.1$Bray_dissimilarity ~ Temporary_df_2.1$StageofBiofilm, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1$Bray_dissimilarity, Temporary_df_2.1$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1$Bray_dissimilarity, Temporary_df_2.1$Sequencing, p.adjust.method = "bonferroni")
+#Significant differences for sample_time, developmental stage, and sequencing
+
+####Prokaryotes####
+Temporary_df_2.1_Prok = subset(Temporary_df_2.1, Sequencing == "Prokaryotes")
+wilcox.test(Temporary_df_2.1_Prok$Bray_dissimilarity ~ Temporary_df_2.1_Prok$Mesh_status, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1_Prok$Bray_dissimilarity, Temporary_df_2.1_Prok$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1_Prok$Bray_dissimilarity, Temporary_df_2.1_Prok$Substrate, p.adjust.method = "bonferroni")
+wilcox.test(Temporary_df_2.1_Prok$Bray_dissimilarity ~ Temporary_df_2.1_Prok$StageofBiofilm, p.adjust.method = "bonferroni")
+
+####Eukaryotes####
+Temporary_df_2.1_Euk = subset(Temporary_df_2.1, Sequencing == "Eukaryotes")
+wilcox.test(Temporary_df_2.1_Euk$Bray_dissimilarity ~ Temporary_df_2.1_Euk$Mesh_status, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1_Euk$Bray_dissimilarity, Temporary_df_2.1_Euk$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Temporary_df_2.1_Euk$Bray_dissimilarity, Temporary_df_2.1_Euk$Substrate, p.adjust.method = "bonferroni")
+wilcox.test(Temporary_df_2.1_Euk$Bray_dissimilarity ~ Temporary_df_2.1_Euk$StageofBiofilm, p.adjust.method = "bonferroni")
+
+pairwise.wilcox.test(Temporary_df_2.1_Euk$Bray_dissimilarity, Temporary_df_2.1_Euk$Sample_time, p.adjust.method = "bonferroni")
+```
+
+#Compile figure using ggarrange
+```{r}
+
+#Make legend only plot
+Legend_16S = get_legend(Ratio_plot_16S)
+Legend_18S = get_legend(Ratio_plot_18S)
+#Remove legend from actual plots
+Ratio_plot_16S = Ratio_plot_16S + theme(legend.position = "none")
+Ratio_plot_18S = Ratio_plot_18S + theme(legend.position = "none")
+
+#Combine legends into new plot
+Both_Legends = ggarrange(as_ggplot(Legend_16S),
+                               as_ggplot(Legend_18S),
+                               ncol = 2)
+#Make sure it worked
+Both_Legends
+
+#Plot top
+Top = ggarrange(NMDS_16S,
+            NMDS_18S,
+          labels = c("A", "B"),
+          ncol = 2,
+          nrow = 1,
+          common.legend = T,
+          legend = "right")
+
+#Plot centre
+Centre = ggarrange(Plot_bray_16S,
+            Plot_bray_18S,
+            nrow = 1,
+            common.legend = T,
+            labels = c("C", "D"),
+            legend = "right")
+
+#Plot bottom
+Bottom = ggarrange(Ratio_plot_16S,
+            Ratio_plot_18S,
+            Both_Legends,
+            nrow = 1,
+            common.legend = F,
+            labels = c("E", "F", ""))
+
+Figure2 = ggarrange(Top  ,
+  Centre,
+  Bottom,
+  heights = c(1, 1, 1),
+  labels = c("", 
+             "C",
+             ""),
+  nrow = 3,
+  align = "v"
+  )
+
+#Inspect
+Figure2
+
+#Save plot
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/Figure2_WaterComparison.pdf", width = 16, height = 20)
+Figure2
+dev.off()
+```
+
+
+
+
+
+
+

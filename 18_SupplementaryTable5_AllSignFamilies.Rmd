@@ -1,0 +1,150 @@
+---
+title: "Supplmentary Table - All families"
+author: "Sven Tobias-Hunefeldt"
+date: "30/03/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script
+
+```{r load packages}
+
+library(ggpubr)
+library(ggplot2)
+library(Rmisc)
+library(vegan)
+library(plyr)
+library(dplyr)
+library(phyloseq)
+
+```
+
+#All significantly correlated families, not just > 3% abundance
+```{r Prokaryotes}
+
+#Restore a pristine copy from back up
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Group them by their sample time
+dge_EdgeR_obj_Time = phyloseq_to_edgeR(Phyloseq_Biofilm_16S_noA, group = "Sample_time")
+
+# Perform binary test
+et_EdgeR_Time = exactTest(dge_EdgeR_obj_Time)
+# Adjust p value and extract values from test results
+tt_EdgeR_Time = topTags(et_EdgeR_Time, n = nrow(dge_EdgeR_obj_Time$table), adjust.method = "BH", sort.by = "PValue")
+res_EdgeR_Time = tt_EdgeR_Time@.Data[[1]]
+sigtab_2fold_EdgeR_Time<- subset(res_EdgeR_Time, PValue < 0.05 & logFC >= 2 | PValue < 0.05 & logFC <= -2)
+
+
+#Keep only FDR corrected <.1
+sigtab_2fold_FDR_Time <- subset(sigtab_2fold_EdgeR_Time, FDR < 0.1)
+
+keepTaxa_FDR_Time <- sigtab_2fold_EdgeR_Time$Genus #Extract the OTU table that was shown to be significant
+Twofold_FDR_Time <- subset_taxa(Phyloseq_Biofilm_16S_noA, Genus %in% keepTaxa_FDR_Time) #Subset the taxa by the OTUs that were shown to change significantly
+dat_2fold_FDR_Time <- tax_glom(Twofold_FDR_Time, taxrank = 'Family') %>%#Merge the species at the Family level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt() #Melt it into a dataframe
+
+dat_2fold_FDR_Time <- dat_2fold_FDR_Time[order(dat_2fold_FDR_Time$Family),] #Order them at the Family level
+
+dat_2fold_FDR_Time$Family <- as.character(dat_2fold_FDR_Time$Family)
+  # group dataframe by Phylum, calculate relative abundance
+
+#Remove na values
+dat_2fold_FDR_Time$Abundance[grep(NaN, dat_2fold_FDR_Time$Abundance)] = 0
+
+#Summarise for table
+Summary_Time_Family_Prok <- summarySE(dat_2fold_FDR_Time, measurevar="Abundance", groupvars=c("Kingdom", "Phylum", "Class", "Order", "Family", "Mesh_status", "Sample_time", "StageofBiofilm", "Substrate"))
+Summary_Time_Family_Prok
+
+
+#Arrange and reduce file size for easier visualisation
+Summary_Time_Family_Prok<-dplyr::arrange(Summary_Time_Family_Prok, Phylum, Family, Abundance)
+Summary_Time_Family_Prok$Family <- factor(Summary_Time_Family_Prok$Family,
+                         levels=(unique(Summary_Time_Family_Prok$Family)))
+
+write.csv(Summary_Time_Family, file = "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Tables/Summary_Time_Family_16S.csv")
+
+#Check for weird names and make Rare taxa name better.
+levels(Summary_Time_Family_Prok$Family)
+levels(Summary_Time_Family_Prok$Phylum)
+```
+```{r Eukaryotes}
+
+#Restore a pristine copy from back up
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Group them by their sample time
+dge_EdgeR_obj_Time = phyloseq_to_edgeR(Phyloseq_Biofilm_18S_noA@sam_data, group = "Sample_time")
+
+# Perform binary test
+et_EdgeR_Time = exactTest(dge_EdgeR_obj_Time)
+# Adjust p values and and extract values from test results
+tt_EdgeR_Time = topTags(et_EdgeR_Time, n = nrow(dge_EdgeR_obj_Time$table), adjust.method = "BH", sort.by = "PValue")
+res_EdgeR_Time = tt_EdgeR_Time@.Data[[1]]
+sigtab_2fold_EdgeR_Time<- subset(res_EdgeR_Time, PValue < 0.05 & logFC >= 2 | PValue < 0.05 & logFC <= -2)
+
+
+#Keep only FDR corrected <.1
+sigtab_2fold_FDR_Time <- subset(sigtab_2fold_EdgeR_Time, FDR < 0.1)
+
+keepTaxa_FDR_Time <- sigtab_2fold_EdgeR_Time$Genus #Extract the OTU table that was shown to be significant
+Twofold_FDR_Time <- subset_taxa(Phyloseq_Biofilm_18S_noA, Genus %in% keepTaxa_FDR_Time) #Subset the taxa by the OTUs that were shown to change significantly
+dat_2fold_FDR_Time <- tax_glom(Twofold_FDR_Time, taxrank = 'Family') %>%#Merge the species at the Family level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt() #Melt it into a dataframe
+
+dat_2fold_FDR_Time <- dat_2fold_FDR_Time[order(dat_2fold_FDR_Time$Family),] #Order them at the Family level
+
+dat_2fold_FDR_Time$Family <- as.character(dat_2fold_FDR_Time$Family)
+  # group dataframe by Phylum, calculate relative abundance
+
+#Remove na values
+dat_2fold_FDR_Time$Abundance[grep(NaN, dat_2fold_FDR_Time$Abundance)] = 0
+
+#Summarise for table
+Summary_Time_Family_Euk <- summarySE(dat_2fold_FDR_Time, measurevar="Abundance", groupvars=c("Kingdom", "Phylum", "Class", "Order", "Family", "Mesh_status", "Sample_time", "StageofBiofilm", "Substrate"))
+Summary_Time_Family_Euk
+
+#Reorder and arrange for easier viewing
+Summary_Time_Family_Euk<-dplyr::arrange(Summary_Time_Family_Euk, Phylum, Family, Abundance)
+Summary_Time_Family_Euk$Family <- factor(Summary_Time_Family_Euk$Family,
+                         levels=(unique(Summary_Time_Family_Euk$Family)))
+
+write.csv(Summary_Time_Family_Euk, file = "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Tables/Summary_Time_Family_18S.csv")
+#Check for weird names and make Rare taxa name better.
+levels(Summary_Time_Family_Euk$Family)
+levels(Summary_Time_Family_Euk$Phylum)
+```
+```{r Combine into one csv file}
+#Ensure that dimensions match
+dim(Summary_Time_Family_Prok)
+dim(Summary_Time_Family_Euk)
+#Combine rows
+Summary_Time_Family_all = rbind(Summary_Time_Family_Prok, Summary_Time_Family_Euk)
+#Extract table
+write.csv(Summary_Time_Family_all, file = "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Tables/Summary_Time_Family.csv")
+
+Halieaceae_df = Summary_Time_Family_all[c(3761:3807),]
+
+test_mean = Halieaceae_df %>% 
+  group_by(Substrate) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+test_mean = Halieaceae_df %>% 
+  group_by(StageofBiofilm) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+```

@@ -1,0 +1,1993 @@
+---
+title: "Figure 5 - Biofilm composition convergence"
+author: "Sven Tobias-Hunefeldt"
+date: "03/04/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script.
+
+```{r load packages}
+
+library(microbiome)
+library(Rmisc)
+library(ggplot2)
+library(ggpubr)
+library(vegan)
+library(RVAideMemoire)
+library(tidyverse)
+library(tibble)
+library(tidyr)
+library(dplyr)
+library(rstatix)
+library(broom)
+
+```
+```{r Refine colours and shapes}
+#Refine colours
+cbbPalette <- c("black",
+                "red",
+                "navy", 
+                "green", 
+                "magenta",
+                "forestgreen",
+                "turquoise")
+
+Time_colour_list = c("0" = "turquoise", 
+                     "7" = "forestgreen", 
+                     "14" = "black", 
+                     "19" = "red", 
+                     "28" = "navy", 
+                     "42" = "green", 
+                     "56" = "magenta")
+
+#Refine shape list
+Substrate_shape_list = c("Plastic" = 15, #Filled square 
+                         "Glass" = 16, #Filled circle
+                         "Tile" = 17, #Filled Triangle
+                         "Wood" = 5, #Hollow diamond
+                         "Water" = 11) #Lined star
+
+#Make colour lists
+Substrate_colour_list = c("Plastic" = "black",
+                  "Glass" = "green",
+                  "Tile" = "blue",
+                  "Wood" = "magenta")
+
+Sequencing_colours = c("Prokaryotes" = "black",
+                       "Eukaryotes" = "red")
+
+Mesh_Palette = c("Enclosed" = "#000000",
+                 "Non-enclosed" = "#E69F00")
+
+```
+#Figure 5 A
+##Plot
+```{r}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Subset to only biofilm samples
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Convert and reorder time for plotting
+sample_data(Phyloseq_Biofilm_16S_noA)$Sample_time<-as.factor(as.character(sample_data(Phyloseq_Biofilm_16S_noA)$Sample_time))
+sample_data(Phyloseq_Biofilm_16S_noA)$Sequencing <-as.factor("Prokaryotes")
+
+#Calculate ordination matrix based on Bray-Curtis dissimilarity
+NMDS.ord_16S_noA <- ordinate(Phyloseq_Biofilm_16S_noA, method = "NMDS", distance = "bray")
+#Ensure data is good fit
+stressplot(NMDS.ord_16S_noA) #Good stressplot
+NMDS.ord_16S_noA #Good level of stress
+
+#Design plot
+NMDS_16S_noA = plot_ordination(Phyloseq_Biofilm_16S_noA, 
+                             NMDS.ord_16S_noA, 
+                             shape = "Substrate", 
+                             color = "Sample_time"
+                             ) + 
+  theme(legend.position = "right")+
+  stat_ellipse(aes(group = Sample_time, lwd = 1))+
+  scale_color_manual("Time (days)", values = Time_colour_list, breaks = c(7, 14, 19,28,42,56))+
+  scale_shape_manual(values = Substrate_shape_list)+
+  geom_point(aes(size = 6), show.legend = F)+
+  facet_grid(. ~ Sequencing)+
+  annotate("text", x=-4, y=3.25, size = 6, label= paste0("Stress = ", round(NMDS.ord_16S_noA$stress, digits = 3)))+
+  theme_bw()+
+  My_Theme+
+  guides(colour = guide_legend(order = 1),
+         shape = guide_legend(order = 2),
+         size = F)
+#Inspect plot
+NMDS_16S_noA
+
+```
+```{r Calculate ellipse variability}
+
+#Extract ellipse coordinates from plot
+pb = ggplot_build(NMDS_16S_noA)
+el = pb$data[[2]][c("colour", 
+                    #"shape",
+                    "x",
+                    "y")]
+
+
+i=1
+ellipseAreaList = data.frame()
+group_list = unique(el$colour)
+#Separate into groups
+for (i in 1:length(group_list)) {
+
+  #Subset to separate into individual ellipse groups - if you used shape in addition to colour you'll want to change this as well
+  Object = subset(el, 
+                  colour == group_list[i])
+  
+  #Remove grouping column
+  Object = Object[-1]
+  
+  # Center of ellipse
+  ctr = MASS::cov.trob(Object)$center  
+  
+  # Calculate distance to center from each point on the ellipse
+  dist2center <- sqrt(rowSums((t(t(Object)-ctr))^2))
+
+  # Calculate area of ellipse from semi-major and semi-minor axes. 
+  # These are, respectively, the largest and smallest values of dist2center. 
+  value = pi*min(dist2center)*max(dist2center)
+  
+  #Store in the area list
+  ellipseAreaList = rbind(ellipseAreaList, data.frame(group_list[i], value))
+}
+
+#Assign days from the colour scheme
+ellipseAreaList$Day[grep("black", ellipseAreaList$group_list.i.)] = 14
+ellipseAreaList$Day[grep("red", ellipseAreaList$group_list.i.)] = 19
+ellipseAreaList$Day[grep("navy", ellipseAreaList$group_list.i.)] = 28
+ellipseAreaList$Day[grep("green", ellipseAreaList$group_list.i.)] = 42
+ellipseAreaList$Day[grep("magenta", ellipseAreaList$group_list.i.)] = 56
+ellipseAreaList$Day[grep("forestgreen", ellipseAreaList$group_list.i.)] = 7
+#Assign developmental stage from time
+ellipseAreaList$StageofBiofilm = factor("Early", levels = c("Early", "Late"))
+ellipseAreaList$StageofBiofilm[grep("7", ellipseAreaList$Day)] = as.factor("Early")
+ellipseAreaList$StageofBiofilm[grep("14", ellipseAreaList$Day)] = as.factor("Early")
+ellipseAreaList$StageofBiofilm[grep("19", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("28", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("42", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("56", ellipseAreaList$Day)] = as.factor("Late")
+
+#Arrange for easier reading
+ellipseAreaList = arrange(ellipseAreaList, desc(value))
+ellipseAreaList
+
+#Is the trend significant?
+cor.test(ellipseAreaList$value, ellipseAreaList$Day, method = "spearman")
+#wilcox.test(ellipseAreaList$value ~ ellipseAreaList$StageofBiofilm, p.adjust.method = "bonferroni")
+
+#Calculate degree of difference from late to early
+test_mean = ellipseAreaList %>%
+  group_by(StageofBiofilm) %>%
+  dplyr::summarise(mean_val = mean(value), sd_val = sd(value))
+print(test_mean)
+
+test_mean$mean_val[2]/test_mean$mean_val[1]
+```
+##Anosim and adonis tests
+###Whole community
+####Time
+```{r 16S NMDS derived stat tests - Sample_time}
+####anosim####
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Sample_time")
+Sample_time_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray"), Sample_time_group, distance = "bray")
+Sample_time_ano$signif #0.001
+Sample_time_ano$statistic #0.4191012
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Sample_time_group)
+Depth_ado
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.14363
+#p = 0.001
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Phyloseq_Biofilm_16S_noA@sam_data$Sample_time * Phyloseq_Biofilm_16S_noA@sam_data$Mesh_status * Phyloseq_Biofilm_16S_noA@sam_data$Substrate)
+Depth_ado
+
+####Pairwise PERMANOVA####
+Time_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray")
+Depth_ado = pairwise.perm.manova(df_tran.dist, Time_group, nperm = 999, p.method = "bonferroni")
+Depth_ado
+
+```
+####StageofBiofilm
+```{r 16S NMDS derived stat tests - Sample_time}
+####anosim####
+StageofBiofilm_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "StageofBiofilm")
+StageofBiofilm_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray"), StageofBiofilm_group, distance = "bray")
+StageofBiofilm_ano$signif #0.001
+StageofBiofilm_ano$statistic #0.6616172
+#Significant differences between group means - based on StageofBiofilm type
+
+####Adonis####
+
+StageofBiofilm_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ StageofBiofilm_group)
+Depth_ado
+#Significant differences between group means and distribution - based on StageofBiofilm types
+#R2 = 0.12971
+#p = 0.001
+
+```
+####Substrate
+```{r 16S NMDS derived stat tests - substrate}
+####anosim####
+Substrate_group = get_variable(Phyloseq_Biofilm_16S_noA, "Substrate")
+substrate_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray"), Substrate_group, distance = "bray")
+substrate_ano$signif #0.001
+substrate_ano$statistic #0.1655525
+#Significant differences between group means - based on substrate type
+
+####Adonis####
+
+substrate_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Substrate")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ substrate_group)
+Depth_ado
+#Significant differences between group means and distribution - based on substrate types
+#R2 = 0.1033
+#p = 0.001
+
+```
+####Meshstatus
+```{r 16S NMDS derived stat tests - mesh_status}
+####anosim####
+meshstatus_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Mesh_status")
+meshstatus_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray"), meshstatus_group)
+meshstatus_ano$signif #0.001
+meshstatus_ano$statistic #0.2102113
+#Significant differences between group means - based on mesh status
+
+####Adonis####
+
+meshstatus_group = get_variable(Phyloseq_Biofilm_16S_noA@sam_data, "Mesh_status")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA, method = "bray")
+meshstatus_ado = adonis(df_tran.dist ~ meshstatus_group)
+meshstatus_ado
+#Significant differences between group means and distribution - based on mesh status
+#R2 = 0.07366
+#p = 0.002
+
+```
+###Early community
+```{r}
+Phyloseq_Biofilm_16S_noA_T12 = subset_samples(Phyloseq_Biofilm_16S_noA, StageofBiofilm == "Early")
+```
+
+####Time
+```{r 16S NMDS derived stat tests - Sample_time}
+####anosim####
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA_T12@sam_data, "Sample_time")
+Sample_time_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA_T12, method = "bray"), Sample_time_group, distance = "bray")
+Sample_time_ano$signif
+Sample_time_ano$statistic
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA_T12@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA_T12, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Sample_time_group)
+Depth_ado
+#Significant differences between group means and distribution - based on Sample_time types
+
+```
+####Substrate
+```{r 16S NMDS derived stat tests - substrate}
+####anosim####
+Substrate_group = get_variable(Phyloseq_Biofilm_16S_noA_T12, "Substrate")
+substrate_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA_T12, method = "bray"), Substrate_group, distance = "bray")
+substrate_ano$signif
+substrate_ano$statistic
+#Significant differences between group means - based on substrate type
+
+####Adonis####
+
+substrate_group = get_variable(Phyloseq_Biofilm_16S_noA_T12@sam_data, "Substrate")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA_T12, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ substrate_group)
+Depth_ado
+#Significant differences between group means and distribution - based on substrate types
+
+```
+####Meshstatus
+```{r 16S NMDS derived stat tests - mesh_status}
+####anosim####
+meshstatus_group = get_variable(Phyloseq_Biofilm_16S_noA_T12@sam_data, "Mesh_status")
+meshstatus_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA_T12, method = "bray"), meshstatus_group)
+meshstatus_ano$signif
+meshstatus_ano$statistic
+#Significant differences between group means - based on mesh status
+
+####Adonis####
+
+meshstatus_group = get_variable(Phyloseq_Biofilm_16S_noA_T12@sam_data, "Mesh_status")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA_T12, method = "bray")
+meshstatus_ado = adonis(df_tran.dist ~ meshstatus_group)
+meshstatus_ado
+#Significant differences between group means and distribution - based on mesh status
+
+```
+###Late community
+```{r}
+Phyloseq_Biofilm_16S_noA_T3456 = subset_samples(Phyloseq_Biofilm_16S_noA, StageofBiofilm == "Late")
+```
+
+####Time
+```{r 16S NMDS derived stat tests - Sample_time}
+####anosim####
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA_T3456@sam_data, "Sample_time")
+Sample_time_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA_T3456, method = "bray"), Sample_time_group, distance = "bray")
+Sample_time_ano$signif
+Sample_time_ano$statistic
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_16S_noA_T3456@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA_T3456, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Sample_time_group)
+Depth_ado
+#Significant differences between group means and distribution - based on Sample_time types
+
+```
+####Substrate
+```{r 16S NMDS derived stat tests - substrate}
+####anosim####
+Substrate_group = get_variable(Phyloseq_Biofilm_16S_noA_T3456@sam_data, "Substrate")
+substrate_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA_T3456, method = "bray"), Substrate_group, distance = "bray")
+substrate_ano$signif
+substrate_ano$statistic
+#Significant differences between group means - based on substrate type
+
+####Adonis####
+
+substrate_group = get_variable(Phyloseq_Biofilm_16S_noA_T3456@sam_data, "Substrate")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA_T3456, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ substrate_group)
+Depth_ado
+#Significant differences between group means and distribution - based on substrate types
+
+```
+####Meshstatus
+```{r 16S NMDS derived stat tests - mesh_status}
+####anosim####
+meshstatus_group = get_variable(Phyloseq_Biofilm_16S_noA_T3456@sam_data, "Mesh_status")
+meshstatus_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_16S_noA_T3456, method = "bray"), meshstatus_group)
+meshstatus_ano$signif
+meshstatus_ano$statistic
+#Significant differences between group means - based on mesh status
+
+####Adonis####
+
+meshstatus_group = get_variable(Phyloseq_Biofilm_16S_noA_T3456@sam_data, "Mesh_status")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_16S_noA_T3456, method = "bray")
+meshstatus_ado = adonis(df_tran.dist ~ meshstatus_group)
+meshstatus_ado
+#Significant differences between group means and distribution - based on mesh status
+
+```
+##Spearman
+```{r Add NMDS1 coordinates to mapping file (alpha_meta_inout)}
+#Extract coordinates by axis
+SiteNMDScoordinates = NMDS.ord_16S_noA$points
+#Save a pristine copy for back up
+Map_16S_alpha_noA_v0 = Map_16S_alpha_noA
+#Bind NMDS columns to dataframe
+forspearman = cbind(Map_16S_alpha_noA, SiteNMDScoordinates)
+
+#Remove non-numeric things.
+forspearman_numericonly = forspearman[,-c(4:14,16)]
+forspearmanv0 = forspearman
+
+```
+```{r Spearman and p-value determination}
+#Make a df to add rho and p-value to.
+
+Rho_p.value_fixed_df = data.frame("Variable 1" = NA, "Variable 2" = 0, "rho value" = 0, "p.value" = 0)
+
+#Carry out spearman - Observed
+spearman_Observed = cor.test(forspearman$MDS1, forspearman$Observed, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Observed
+Rho_p.value_fixed_df[1,1] = "NMDS1"
+Rho_p.value_fixed_df[1,2] = "Observed"
+Rho_p.value_fixed_df[1,3] = spearman_Observed$estimate 
+Rho_p.value_fixed_df[1,4] = spearman_Observed$p.value  
+
+#Carry out spearman - Shannon
+spearman_Shannon = cor.test(forspearman$MDS1, forspearman$Shannon, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Shannon
+Rho_p.value_fixed_df[2,1] = "NMDS1"
+Rho_p.value_fixed_df[2,2] = "Shannon"
+Rho_p.value_fixed_df[2,3] = spearman_Shannon$estimate 
+Rho_p.value_fixed_df[2,4] = spearman_Shannon$p.value  
+
+#Carry out spearman - Pielou
+spearman_Pielou = cor.test(forspearman$MDS1, forspearman$Pielou, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Pielou
+Rho_p.value_fixed_df[3,1] = "NMDS1"
+Rho_p.value_fixed_df[3,2] = "Pielou"
+Rho_p.value_fixed_df[3,3] = spearman_Pielou$estimate 
+Rho_p.value_fixed_df[3,4] = spearman_Pielou$p.value  
+
+#Carry out spearman - Sample_time
+spearman_Sample_time = cor.test(forspearman$MDS1, forspearman$Sample_time, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Sample_time
+Rho_p.value_fixed_df[4,1] = "NMDS1"
+Rho_p.value_fixed_df[4,2] = "Sample_time"
+Rho_p.value_fixed_df[4,3] = spearman_Sample_time$estimate 
+Rho_p.value_fixed_df[4,4] = spearman_Sample_time$p.value  
+
+
+
+
+
+#Carry out spearman - Observed
+spearman_Observed = cor.test(forspearman$MDS1, forspearman$Observed, method = "spearman")
+#Extract rho and p-value - Observed
+Rho_p.value_fixed_df[5,1] = "NMDS2"
+Rho_p.value_fixed_df[5,2] = "Observed"
+Rho_p.value_fixed_df[5,3] = spearman_Observed$estimate 
+Rho_p.value_fixed_df[5,4] = spearman_Observed$p.value  
+
+#Carry out spearman - Shannon
+spearman_Shannon = cor.test(forspearman$MDS2, forspearman$Shannon, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Shannon
+Rho_p.value_fixed_df[6,1] = "NMDS2"
+Rho_p.value_fixed_df[6,2] = "Shannon"
+Rho_p.value_fixed_df[6,3] = spearman_Shannon$estimate 
+Rho_p.value_fixed_df[6,4] = spearman_Shannon$p.value  
+
+#Carry out spearman - Pielou
+spearman_Pielou = cor.test(forspearman$MDS2, forspearman$Pielou, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Pielou
+Rho_p.value_fixed_df[7,1] = "NMDS2"
+Rho_p.value_fixed_df[7,2] = "Pielou"
+Rho_p.value_fixed_df[7,3] = spearman_Pielou$estimate 
+Rho_p.value_fixed_df[7,4] = spearman_Pielou$p.value  
+
+#Carry out spearman - Sample_time
+spearman_Sample_time = cor.test(forspearman$MDS2, forspearman$Sample_time, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Sample_time
+Rho_p.value_fixed_df[8,1] = "NMDS2"
+Rho_p.value_fixed_df[8,2] = "Sample_time"
+Rho_p.value_fixed_df[8,3] = spearman_Sample_time$estimate 
+Rho_p.value_fixed_df[8,4] = spearman_Sample_time$p.value  
+```
+```{r adjusted p value}
+#Carry out bonferroni correction
+adjusted_p.value = p.adjust(Rho_p.value_fixed_df$p.value, method = "bonferroni")
+#Convert list into dataframe to add to summary table.
+adjusted_p.value = as.data.frame(adjusted_p.value)
+#Bind adjusted p-value onto data frame
+Spearman = cbind(Rho_p.value_fixed_df, adjusted_p.value$adjusted_p.value)
+#Rename adjusted p value column
+colnames(Spearman)[which(names(Spearman) == "adjusted_p.value$adjusted_p.value")] <- "adjusted_p_value"
+```
+```{r Extract table}
+#Extract the whole dataframe for records
+#write.csv(Spearman, "Spearman_withsignificance_adjusted.csv")
+#Subset to only the statistically significant values
+onlysignificance = subset(Spearman, adjusted_p_value < 0.05)
+onlysignificance
+```
+#Figure 5 B
+##Plot
+```{r}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Subset to only biofilm samples
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Convert and reorder time for plotting
+sample_data(Phyloseq_Biofilm_18S_noA)$Sample_time<-as.factor(as.character(sample_data(Phyloseq_Biofilm_18S_noA)$Sample_time))
+sample_data(Phyloseq_Biofilm_18S_noA)$Sequencing <-as.factor("Eukaryotes")
+
+#Calculate ordination matrix based on Bray-Curtis dissimilarity
+NMDS.ord_18S_noA <- ordinate(Phyloseq_Biofilm_18S_noA, method = "NMDS", distance = "bray")
+#Ensure data is good fit
+stressplot(NMDS.ord_18S_noA) #Good stressplot
+NMDS.ord_18S_noA #Good level of stress
+
+#Design plot
+NMDS_18S_noA = plot_ordination(Phyloseq_Biofilm_18S_noA, 
+                             NMDS.ord_18S_noA, 
+                             shape = "Substrate", 
+                             color = "Sample_time"
+                             ) + 
+  theme(legend.position = "right")+
+  stat_ellipse(aes(group = Sample_time, lwd = 1))+
+  scale_color_manual("Time (days)", values = Time_colour_list, breaks = c(7, 14, 19,28,42,56))+
+  scale_shape_manual(values = Substrate_shape_list)+
+  geom_point(aes(size = 6), show.legend = F)+
+  facet_grid(. ~ Sequencing)+
+  annotate("text", x=-2.4, y=2, size = 6, label= paste0("Stress = ", round(NMDS.ord_18S_noA$stress, digits = 3)))+
+  theme_bw()+
+  My_Theme+
+  guides(colour = guide_legend(order = 1),
+         shape = guide_legend(order = 2),
+         size = F)
+  
+#Inspect
+NMDS_18S_noA
+```
+```{r Calculate ellipse variability}
+
+#Extract ellipse coordinates from plot
+pb = ggplot_build(NMDS_18S_noA)
+el = pb$data[[2]][c("colour", 
+                    #"shape",
+                    "x",
+                    "y")]
+
+
+i=1
+ellipseAreaList = data.frame()
+group_list = unique(el$colour)
+#Separate into groups
+for (i in 1:length(group_list)) {
+
+  #Subset to separate into individual ellipse groups - if you used shape in addition to colour you'll want to change this as well
+  Object = subset(el, 
+                  colour == group_list[i])
+  
+  #Remove grouping column
+  Object = Object[-1]
+  
+  # Center of ellipse
+  ctr = MASS::cov.trob(Object)$center  
+  
+  # Calculate distance to center from each point on the ellipse
+  dist2center <- sqrt(rowSums((t(t(Object)-ctr))^2))
+
+  # Calculate area of ellipse from semi-major and semi-minor axes. 
+  # These are, respectively, the largest and smallest values of dist2center. 
+  value = pi*min(dist2center)*max(dist2center)
+  
+  #Store in the area list
+  ellipseAreaList = rbind(ellipseAreaList, data.frame(group_list[i], value))
+}
+
+#Assign days from the colour scheme
+ellipseAreaList$Day[grep("black", ellipseAreaList$group_list.i.)] = 14
+ellipseAreaList$Day[grep("red", ellipseAreaList$group_list.i.)] = 19
+ellipseAreaList$Day[grep("navy", ellipseAreaList$group_list.i.)] = 28
+ellipseAreaList$Day[grep("green", ellipseAreaList$group_list.i.)] = 42
+ellipseAreaList$Day[grep("magenta", ellipseAreaList$group_list.i.)] = 56
+ellipseAreaList$Day[grep("forestgreen", ellipseAreaList$group_list.i.)] = 7
+#Assign developmental stage from time
+ellipseAreaList$StageofBiofilm = factor("Early", levels = c("Early", "Late"))
+ellipseAreaList$StageofBiofilm[grep("7", ellipseAreaList$Day)] = as.factor("Early")
+ellipseAreaList$StageofBiofilm[grep("14", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("19", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("28", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("42", ellipseAreaList$Day)] = as.factor("Late")
+ellipseAreaList$StageofBiofilm[grep("56", ellipseAreaList$Day)] = as.factor("Late")
+
+#Arrange for easier reading
+ellipseAreaList = arrange(ellipseAreaList, desc(value))
+ellipseAreaList
+
+#Is the trend significant?
+cor.test(ellipseAreaList$value, ellipseAreaList$Day, method = "spearman")
+#wilcox.test(ellipseAreaList$value ~ ellipseAreaList$StageofBiofilm, p.adjust.method = "bonferroni")
+
+#Calculate degree of difference from late to early
+test_mean = ellipseAreaList %>%
+  group_by(StageofBiofilm) %>%
+  dplyr::summarise(mean_val = mean(value), sd_val = sd(value))
+print(test_mean)
+
+test_mean$mean_val[2]/test_mean$mean_val[1]
+```
+##Anosim and adonis tests
+###Whole community
+####Time
+```{r 18S NMDS derived stat tests - Sample_time}
+####anosim####
+Sample_time_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Sample_time")
+Sample_time_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray"), Sample_time_group, distance = "bray")
+Sample_time_ano$signif #0.001
+Sample_time_ano$statistic #0.4181049
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Sample_time_group)
+Depth_ado
+#Significant differences between group means and distribution - based on Sample_time types
+#R2 = 0.19445
+#p = 0.001
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Phyloseq_Biofilm_18S_noA@sam_data$Sample_time * Phyloseq_Biofilm_18S_noA@sam_data$Mesh_status * Phyloseq_Biofilm_18S_noA@sam_data$Substrate)
+Depth_ado
+
+####Pairwise PERMANOVA####
+Time_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray")
+Depth_ado = pairwise.perm.manova(df_tran.dist, Time_group, nperm = 999, p.method = "bonferroni")
+Depth_ado
+
+```
+####StageofBiofilm
+```{r 18S NMDS derived stat tests - Sample_time}
+####anosim####
+StageofBiofilm_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "StageofBiofilm")
+StageofBiofilm_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray"), StageofBiofilm_group, distance = "bray")
+StageofBiofilm_ano$signif #0.001
+StageofBiofilm_ano$statistic #0.5821785
+#Significant differences between group means - based on StageofBiofilm type
+
+####Adonis####
+
+StageofBiofilm_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "StageofBiofilm")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ StageofBiofilm_group)
+Depth_ado
+#Significant differences between group means and distribution - based on StageofBiofilm types
+#R2 = 0.06868
+#p = 0.001
+
+```
+####Substrate
+```{r 18S NMDS derived stat tests - substrate}
+####anosim####
+Substrate_group = get_variable(Phyloseq_Biofilm_18S_noA, "Substrate")
+substrate_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray"), Substrate_group, distance = "bray")
+substrate_ano$signif #0.001
+substrate_ano$statistic #0.05360851
+#Significant differences between group means - based on substrate type
+
+####Adonis####
+
+substrate_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Substrate")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ substrate_group)
+Depth_ado
+#Significant differences between group means and distribution - based on substrate types
+#R2 = 0.04253
+#p = 0.001
+
+```
+####Meshstatus
+```{r 18S NMDS derived stat tests - mesh_status}
+####anosim####
+meshstatus_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Mesh_status")
+meshstatus_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray"), meshstatus_group)
+meshstatus_ano$signif #0.001
+meshstatus_ano$statistic #0.2191434
+#Significant differences between group means - based on mesh status
+
+####Adonis####
+
+meshstatus_group = get_variable(Phyloseq_Biofilm_18S_noA@sam_data, "Mesh_status")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA, method = "bray")
+meshstatus_ado = adonis(df_tran.dist ~ meshstatus_group)
+meshstatus_ado
+#Significant differences between group means and distribution - based on mesh status
+#R2 = 0.0631
+#p = 0.001
+
+```
+###Early community
+```{r}
+Phyloseq_Biofilm_18S_noA_T1 = subset_samples(Phyloseq_Biofilm_18S_noA, StageofBiofilm == "Early")
+```
+####Substrate
+```{r 18S NMDS derived stat tests - substrate}
+####anosim####
+Substrate_group = get_variable(Phyloseq_Biofilm_18S_noA_T1, "Substrate")
+substrate_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA_T1, method = "bray"), Substrate_group, distance = "bray")
+substrate_ano$signif
+substrate_ano$statistic
+#Significant differences between group means - based on substrate type
+
+####Adonis####
+
+substrate_group = get_variable(Phyloseq_Biofilm_18S_noA_T1@sam_data, "Substrate")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA_T1, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ substrate_group)
+Depth_ado
+#Significant differences between group means and distribution - based on substrate types
+
+```
+####Meshstatus
+```{r 18S NMDS derived stat tests - mesh_status}
+####anosim####
+meshstatus_group = get_variable(Phyloseq_Biofilm_18S_noA_T1@sam_data, "Mesh_status")
+meshstatus_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA_T1, method = "bray"), meshstatus_group)
+meshstatus_ano$signif
+meshstatus_ano$statistic
+#Significant differences between group means - based on mesh status
+
+####Adonis####
+
+meshstatus_group = get_variable(Phyloseq_Biofilm_18S_noA_T1@sam_data, "Mesh_status")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA_T1, method = "bray")
+meshstatus_ado = adonis(df_tran.dist ~ meshstatus_group)
+meshstatus_ado
+#Significant differences between group means and distribution - based on mesh status
+
+```
+###Late community
+```{r}
+Phyloseq_Biofilm_18S_noA_T23456 = subset_samples(Phyloseq_Biofilm_18S_noA, StageofBiofilm == "Late")
+```
+
+####Time
+```{r 18S NMDS derived stat tests - Sample_time}
+####anosim####
+Sample_time_group = get_variable(Phyloseq_Biofilm_18S_noA_T23456@sam_data, "Sample_time")
+Sample_time_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA_T23456, method = "bray"), Sample_time_group, distance = "bray")
+Sample_time_ano$signif 
+Sample_time_ano$statistic 
+#Significant differences between group means - based on Sample_time type
+
+####Adonis####
+
+Sample_time_group = get_variable(Phyloseq_Biofilm_18S_noA_T23456@sam_data, "Sample_time")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA_T23456, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ Sample_time_group)
+Depth_ado
+#Significant differences between group means and distribution - based on Sample_time types
+
+```
+####Substrate
+```{r 18S NMDS derived stat tests - substrate}
+####anosim####
+Substrate_group = get_variable(Phyloseq_Biofilm_18S_noA_T23456@sam_data, "Substrate")
+substrate_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA_T23456, method = "bray"), Substrate_group, distance = "bray")
+substrate_ano$signif
+substrate_ano$statistic
+#Significant differences between group means - based on substrate type
+
+####Adonis####
+
+substrate_group = get_variable(Phyloseq_Biofilm_18S_noA_T23456@sam_data, "Substrate")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA_T23456, method = "bray")
+Depth_ado = adonis(df_tran.dist ~ substrate_group)
+Depth_ado
+#Significant differences between group means and distribution - based on substrate types
+
+
+```
+####Meshstatus
+```{r 18S NMDS derived stat tests - mesh_status}
+####anosim####
+meshstatus_group = get_variable(Phyloseq_Biofilm_18S_noA_T23456@sam_data, "Mesh_status")
+meshstatus_ano = anosim(phyloseq::distance(Phyloseq_Biofilm_18S_noA_T23456, method = "bray"), meshstatus_group)
+meshstatus_ano$signif
+meshstatus_ano$statistic
+#Significant differences between group means - based on mesh status
+
+####Adonis####
+
+meshstatus_group = get_variable(Phyloseq_Biofilm_18S_noA_T23456@sam_data, "Mesh_status")
+df_tran.dist = phyloseq::distance(Phyloseq_Biofilm_18S_noA_T23456, method = "bray")
+meshstatus_ado = adonis(df_tran.dist ~ meshstatus_group)
+meshstatus_ado
+#Significant differences between group means and distribution - based on mesh status
+
+```
+##Spearman
+```{r Add NMDS1 coordinates to mapping file (alpha_meta_inout)}
+#Extract coordinates by axis
+SiteNMDScoordinates = NMDS.ord_18S_noA$points
+#Save a pristine copy for back up
+Map_18S_alpha_noA_v0 = Map_18S_alpha_noA
+#Bind NMDS columns to dataframe
+forspearman = cbind(Map_18S_alpha_noA, SiteNMDScoordinates)
+
+#Remove non-numeric things.
+forspearman_numericonly = forspearman[,-c(4:14,16)]
+forspearmanv0 = forspearman
+
+```
+```{r Spearman and p-value determination}
+#Make a df to add rho and p-value to.
+
+Rho_p.value_fixed_df = data.frame("Variable 1" = NA, "Variable 2" = 0, "rho value" = 0, "p.value" = 0)
+
+#Carry out spearman - Observed
+spearman_Observed = cor.test(forspearman$MDS1, forspearman$Observed, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Observed
+Rho_p.value_fixed_df[1,1] = "NMDS1"
+Rho_p.value_fixed_df[1,2] = "Observed"
+Rho_p.value_fixed_df[1,3] = spearman_Observed$estimate 
+Rho_p.value_fixed_df[1,4] = spearman_Observed$p.value  
+
+#Carry out spearman - Shannon
+spearman_Shannon = cor.test(forspearman$MDS1, forspearman$Shannon, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Shannon
+Rho_p.value_fixed_df[2,1] = "NMDS1"
+Rho_p.value_fixed_df[2,2] = "Shannon"
+Rho_p.value_fixed_df[2,3] = spearman_Shannon$estimate 
+Rho_p.value_fixed_df[2,4] = spearman_Shannon$p.value  
+
+#Carry out spearman - Pielou
+spearman_Pielou = cor.test(forspearman$MDS1, forspearman$Pielou, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Pielou
+Rho_p.value_fixed_df[3,1] = "NMDS1"
+Rho_p.value_fixed_df[3,2] = "Pielou"
+Rho_p.value_fixed_df[3,3] = spearman_Pielou$estimate 
+Rho_p.value_fixed_df[3,4] = spearman_Pielou$p.value  
+
+#Carry out spearman - Sample_time
+spearman_Sample_time = cor.test(forspearman$MDS1, forspearman$Sample_time, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Sample_time
+Rho_p.value_fixed_df[4,1] = "NMDS1"
+Rho_p.value_fixed_df[4,2] = "Sample_time"
+Rho_p.value_fixed_df[4,3] = spearman_Sample_time$estimate 
+Rho_p.value_fixed_df[4,4] = spearman_Sample_time$p.value  
+
+
+
+
+
+#Carry out spearman - Observed
+spearman_Observed = cor.test(forspearman$MDS1, forspearman$Observed, method = "spearman")
+#Extract rho and p-value - Observed
+Rho_p.value_fixed_df[5,1] = "NMDS2"
+Rho_p.value_fixed_df[5,2] = "Observed"
+Rho_p.value_fixed_df[5,3] = spearman_Observed$estimate 
+Rho_p.value_fixed_df[5,4] = spearman_Observed$p.value  
+
+#Carry out spearman - Shannon
+spearman_Shannon = cor.test(forspearman$MDS2, forspearman$Shannon, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Shannon
+Rho_p.value_fixed_df[6,1] = "NMDS2"
+Rho_p.value_fixed_df[6,2] = "Shannon"
+Rho_p.value_fixed_df[6,3] = spearman_Shannon$estimate 
+Rho_p.value_fixed_df[6,4] = spearman_Shannon$p.value  
+
+#Carry out spearman - Pielou
+spearman_Pielou = cor.test(forspearman$MDS2, forspearman$Pielou, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Pielou
+Rho_p.value_fixed_df[7,1] = "NMDS2"
+Rho_p.value_fixed_df[7,2] = "Pielou"
+Rho_p.value_fixed_df[7,3] = spearman_Pielou$estimate 
+Rho_p.value_fixed_df[7,4] = spearman_Pielou$p.value  
+
+#Carry out spearman - Sample_time
+spearman_Sample_time = cor.test(forspearman$MDS2, forspearman$Sample_time, method = "spearman")
+#Ties are present due to sample repeats.
+#Extract rho and p-value - Sample_time
+Rho_p.value_fixed_df[8,1] = "NMDS2"
+Rho_p.value_fixed_df[8,2] = "Sample_time"
+Rho_p.value_fixed_df[8,3] = spearman_Sample_time$estimate 
+Rho_p.value_fixed_df[8,4] = spearman_Sample_time$p.value  
+```
+```{r adjusted p value}
+#Carry out bonferroni correction
+adjusted_p.value = p.adjust(Rho_p.value_fixed_df$p.value, method = "bonferroni")
+#Convert list into dataframe to add to summary table.
+adjusted_p.value = as.data.frame(adjusted_p.value)
+#Bind adjusted p-value onto data frame
+Spearman = cbind(Rho_p.value_fixed_df, adjusted_p.value$adjusted_p.value)
+#Rename adjusted p value column
+colnames(Spearman)[which(names(Spearman) == "adjusted_p.value$adjusted_p.value")] <- "adjusted_p_value"
+```
+```{r Extract table}
+#Extract the whole dataframe for records
+#write.csv(Spearman, "Spearman_withsignificance_adjusted.csv")
+#Subset to only the statistically significant values
+onlysignificance = subset(Spearman, adjusted_p_value < 0.05)
+onlysignificance
+```
+
+
+
+
+#Figure 5 C-D
+```{r Extract and run prokayotic comparisons}
+#Get pristine verison of phyloseq
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_16S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_16S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_16S.csv")
+
+```
+```{r Reformat prokaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T | grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_16S_v0 = Temporary_df
+Temporary_df_16S = Temporary_df_16S_v0
+```
+```{r Extract and run rukayotic comparisons}
+#Get pristine verison of phyloseq
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_18S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_18S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_18S.csv")
+
+```
+```{r Reformat eukaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("2", Temporary_df$Var1[i]) == T | grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_18S_v0 = Temporary_df
+Temporary_df_18S = Temporary_df_18S_v0
+```
+```{r Combine prokaryotic and eukaryotic comparisons}
+Temporary_df_16S_v0$Sequencing = as.factor("Prokaryotes")
+Temporary_df_18S_v0$Sequencing = as.factor("Eukaryotes")
+
+Temporary_df = rbind(Temporary_df_16S_v0, Temporary_df_18S_v0)
+Temporary_df_v0 = Temporary_df
+
+
+```
+```{r Subset to needed comparisons and make plot}
+#Subset to useable ones
+Temporary_df = subset(Temporary_df_v0, 
+                      Var2 == "1aeza" | Var2 =="1aezb" | Var2 =="1aezc" |Var2 =="1amzb"|Var2 == "1gezb" |Var2 =="1gezc" |Var2 =="1gmza" |Var2 =="1gmzc" |Var2 =="1peza" |Var2 =="1pezb" |Var2 =="1pezc" |Var2 =="1pmza" |Var2 =="1pmzb" |Var2 =="1pmzc" |Var2 =="1teza" |Var2 =="1tezb" |Var2 =="1tezc" |Var2 =="1tmza" |Var2 =="1tmzb")
+
+#Make sure it worked
+Temporary_df_2 = Temporary_df
+
+#Summarise for plotting
+Temporary_df_2 = summarySE(Temporary_df_2, measurevar="Bray_dissimilarity", groupvars=c("Sample_time", "Substrate", "Mesh_status", "Sequencing", "StageofBiofilm"))
+
+#Remove unneeded samples
+Temporary_df_2 = subset(Temporary_df_2, !Sample_time == "NA")
+Temporary_df_2 = subset(Temporary_df_2, !Substrate == "NA")
+Temporary_df_2 = subset(Temporary_df_2, !Substrate == "Mesh")
+Temporary_df_2 = subset(Temporary_df_2, !Substrate == "Water")
+
+#Clean up and reorder
+Temporary_df_2$Sequencing = factor(Temporary_df_2$Sequencing,
+                                   levels = c("Prokaryotes", "Eukaryotes"))
+Temporary_df_2$Sample_time = factor(Temporary_df_2$Sample_time,
+                         levels=c("7", "14", "19", "28", "42", "56"))
+Temporary_df_2$Substrate <- factor(Temporary_df_2$Substrate,
+                         levels=c("Plastic", "Glass", "Tile", "Wood", "Water"))
+
+#Subset for cleaner downstream plotting
+Temporary_df_2_16S = subset(Temporary_df_2, Sequencing == "Prokaryotes")
+Temporary_df_2_18S = subset(Temporary_df_2, Sequencing == "Eukaryotes")
+
+
+#Plot
+Plot_bray_D7_16S = ggplot(Temporary_df_2_16S, aes(x= Sample_time, y = Bray_dissimilarity, colour = Substrate, group = Substrate)) + 
+  geom_line(lwd = 1)+
+      geom_errorbar(aes(ymin=(Bray_dissimilarity-se), 
+                    ymax=(Bray_dissimilarity+se),
+                    colour = Substrate),
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  scale_color_manual("Condition", values = Substrate_colour_list)+
+  theme_bw()+
+  My_Theme+
+  xlab("Time (days)")+
+  ylab("Bray-Curtis dissimilarity")+
+  scale_y_continuous(limits = c(0.7,1), breaks = c(0.8, 0.9, 1))
+  
+
+Plot_bray_D7_16S
+
+Plot_bray_D7_18S = ggplot(Temporary_df_2_18S, aes(x= Sample_time, y = Bray_dissimilarity, colour = Substrate, group = Substrate)) + 
+  geom_line(lwd = 1)+
+      geom_errorbar(aes(ymin=(Bray_dissimilarity-se), 
+                    ymax=(Bray_dissimilarity+se),
+                    colour = Substrate),
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  scale_color_manual("Condition", values = Substrate_colour_list)+
+  theme_bw()+
+  My_Theme+
+  xlab("Time (days)")+
+  ylab("Bray-Curtis dissimilarity")+
+  scale_y_continuous(limits = c(0.7,1), breaks = c(0.8, 0.9, 1))
+  
+
+Plot_bray_D7_18S
+
+```
+```{r Means, statistics, and gradient}
+Diss_16S_df = subset(Temporary_df_2, Sequencing == "Prokaryotes")
+Diss_18S_df = subset(Temporary_df_2, Sequencing == "Eukaryotes")
+
+####Sequencing effects####
+wilcox.test(Bray_dissimilarity ~ Sequencing, data = Temporary_df_2)
+
+test_mean = Temporary_df_2 %>% 
+  group_by(Sequencing) %>% 
+  summarise(mean_val = mean(Bray_dissimilarity), sd = sd(Bray_dissimilarity))
+print(test_mean)
+test_mean$mean_val[2]-test_mean$mean_val[1]
+
+
+####Sample_time effects####
+kruskal.test(Bray_dissimilarity ~ Sample_time, data = Temporary_df_2)
+kruskal.test(Bray_dissimilarity ~ Sample_time, data = Diss_16S_df)
+kruskal.test(Bray_dissimilarity ~ Sample_time, data = Diss_18S_df)
+
+pairwise.wilcox.test(Diss_16S_df$Bray_dissimilarity, Diss_16S_df$Sample_time, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Diss_18S_df$Bray_dissimilarity, Diss_18S_df$Sample_time, p.adjust.method = "bonferroni")
+
+wilcox.test(Diss_16S_df$Bray_dissimilarity ~ Diss_16S_df$StageofBiofilm, p.adjust.method = "bonferroni")
+wilcox.test(Diss_18S_df$Bray_dissimilarity ~ Diss_18S_df$StageofBiofilm, p.adjust.method = "bonferroni")
+
+test_mean = Temporary_df_2 %>% 
+  group_by(Sequencing, Sample_time) %>% 
+  summarise(mean_val = mean(Bray_dissimilarity ), sd = sd(Bray_dissimilarity ))
+print(test_mean)
+test_mean$mean_val[5]-test_mean$mean_val[6]
+test_mean$mean_val[11]-test_mean$mean_val[12]
+
+####Substrate effects####
+kruskal.test(Bray_dissimilarity ~ Substrate, data = Temporary_df_2)
+kruskal.test(Bray_dissimilarity ~ Substrate, data = Diss_16S_df)
+kruskal.test(Bray_dissimilarity ~ Substrate, data = Diss_18S_df)
+
+pairwise.wilcox.test(Diss_16S_df$Bray_dissimilarity, Diss_16S_df$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Diss_18S_df$Bray_dissimilarity, Diss_18S_df$Substrate, p.adjust.method = "bonferroni")
+
+####Predation effects####
+wilcox.test(Bray_dissimilarity ~ Mesh_status, data = Temporary_df_2)
+wilcox.test(Bray_dissimilarity ~ Mesh_status, data = Diss_16S_df)
+wilcox.test(Bray_dissimilarity ~ Mesh_status, data = Diss_18S_df)
+
+test_mean = Diss_18S_df %>% 
+  group_by(Mesh_status) %>% 
+  dplyr::summarise(mean_val = mean(Bray_dissimilarity), sd = sd(Bray_dissimilarity))
+print(test_mean)
+test_mean$mean_val[2]-test_mean$mean_val[1]
+
+
+####Extract gradient####
+Diss_16S_df_expo = subset(Diss_16S_df, Mesh_status == "Non-enclosed")
+Diss_16S_df_enclo = subset(Diss_16S_df, Mesh_status == "Enclosed")
+Diss_18S_df_expo = subset(Diss_18S_df, Mesh_status == "Non-enclosed")
+Diss_18S_df_enclo = subset(Diss_18S_df, Mesh_status == "Enclosed")
+
+nrow(Diss_16S_df_expo)
+nrow(Diss_16S_df_enclo)
+Diss_16S_df_enclo_noG = subset(Diss_16S_df_enclo, !Substrate == "Glass")
+nrow(Diss_16S_df_enclo_noG)
+Diss_16S_df_enclo_17 = Diss_16S_df_enclo_noG[-15,]
+nrow(Diss_16S_df_enclo_17)
+r.expo_16S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_16S_df_expo)
+r.enclo_16S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_16S_df_enclo_17)
+summary(anova(r.expo_16S, r.enclo_16S))
+summary(r.expo_16S)
+summary(r.enclo_16S)
+
+r.expo_16S$coefficients[2] - r.enclo_16S$coefficients[2] 
+#Non-enclosed communities are 0.1% more different per day
+
+nrow(Diss_18S_df_expo)
+nrow(Diss_18S_df_enclo)
+Diss_18S_df_enclo_noG = subset(Diss_18S_df_enclo, !Substrate == "Glass")
+nrow(Diss_18S_df_enclo_noG)
+Diss_18S_df_enclo_17 = Diss_18S_df_enclo_noG[-15,]
+nrow(Diss_18S_df_enclo_17)
+r.expo_18S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_18S_df_expo)
+r.enclo_18S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_18S_df_enclo_17)
+summary(anova(r.expo_18S, r.enclo_18S))
+summary(r.expo_18S)
+summary(r.enclo_18S)
+
+r.expo_18S$coefficients[2] - r.enclo_18S$coefficients[2] 
+
+####16S gradient between mesh - meets assumptions####
+#https://www.datanovia.com/en/lessons/ancova-in-r/
+
+Diss_16S_df$Sample_time = as.numeric(as.character(Diss_16S_df$Sample_time))
+ggscatter(
+  Diss_16S_df, x = "Sample_time", y = "Bray_dissimilarity",
+  color = "Mesh_status", add = "reg.line"
+  )+
+  stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..rr.label.., sep = "~~~~"), color = Mesh_status)
+    )
+#Linear relationship
+
+Diss_16S_df %>% anova_test(Bray_dissimilarity ~ Mesh_status*Sample_time)#Interaction is not statistcally significant
+
+# Fit the model, the covariate goes first
+model <- lm(Bray_dissimilarity ~ Sample_time + Mesh_status, data = Diss_16S_df)
+# Inspect the model diagnostic metrics
+model.metrics <- augment(model) %>%
+  select(-.hat, -.sigma, -.fitted, -.se.fit) # Remove details
+head(model.metrics, 3)
+
+# Assess normality of residuals using shapiro wilk test
+shapiro_test(model.metrics$.resid)#Shapiro test is not significant
+
+#Homogeneity of variances
+model.metrics %>% levene_test(.resid ~ Mesh_status) #The Levene’s test was not significant (p > 0.05), so we can assume homogeneity of the residual variances for all groups.
+
+#Outliers
+model.metrics %>% 
+  filter(abs(.std.resid) > 3) %>%
+  as.data.frame()
+#No outliers
+
+#Computation
+res.aov <- Diss_16S_df %>% anova_test(Bray_dissimilarity ~ Sample_time + Mesh_status)
+get_anova_table(res.aov)
+
+#Pairwise comparisons
+library(emmeans)
+pwc <- Diss_16S_df %>% 
+  emmeans_test(
+    Bray_dissimilarity ~ Mesh_status, covariate = Sample_time,
+    p.adjust.method = "bonferroni"
+    )
+pwc
+
+# Display the adjusted means of each Mesh_status
+# Also called as the estimated marginal means (emmeans)
+get_emmeans(pwc)
+
+
+
+
+# Visualization: line plots with p-values
+pwc <- pwc %>% add_xy_position(x = "Mesh_status", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "Mesh_status", y = "emmean") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) + 
+  stat_pvalue_manual(pwc, hide.ns = TRUE, tip.length = FALSE) +
+  labs(
+    subtitle = get_test_label(res.aov, detailed = TRUE),
+    caption = get_pwc_label(pwc)
+  )
+
+####18S gradient between mesh - does not meet assumptions####
+Diss_18S_df$Sample_time = as.numeric(as.character(Diss_18S_df$Sample_time))
+ggscatter(
+  Diss_18S_df, x = "Sample_time", y = "Bray_dissimilarity",
+  color = "Mesh_status", add = "reg.line"
+  )+
+  stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..rr.label.., sep = "~~~~"), color = Mesh_status)
+    )
+#Assess linear relationship
+
+Diss_18S_df %>% anova_test(Bray_dissimilarity ~ Mesh_status*Sample_time)
+#No interactions
+
+# Fit the model, the covariate goes first
+model <- lm(Bray_dissimilarity ~ Sample_time + Mesh_status, data = Diss_18S_df)
+# Inspect the model diagnostic metrics
+model.metrics <- augment(model) %>%
+  select(-.hat, -.sigma, -.fitted, -.se.fit) # Remove details
+head(model.metrics, 3) 
+
+# Assess normality of residuals using shapiro wilk test
+shapiro_test(model.metrics$.resid) #Shapiro test was significant - assumptions not met, so residuals are not parametrically distributed.
+
+#Homogeneity of variances
+model.metrics %>% levene_test(.resid ~ Mesh_status) #Test failed, no homogeneity of the residual variances for all groups.
+
+#Outliers
+model.metrics %>% 
+  filter(abs(.std.resid) > 3) %>%
+  as.data.frame()
+
+
+#Computation
+res.aov <- Diss_18S_df %>% anova_test(Bray_dissimilarity ~ Sample_time + Mesh_status)
+get_anova_table(res.aov)
+
+#Pairwise comparisons
+library(emmeans)
+pwc <- Diss_18S_df %>% 
+  emmeans_test(
+    Bray_dissimilarity ~ Mesh_status, covariate = Sample_time,
+    p.adjust.method = "bonferroni"
+    )
+pwc
+
+# Display the adjusted means of each Mesh_status
+# Also called as the estimated marginal means (emmeans)
+get_emmeans(pwc)
+
+
+
+
+# Visualization: line plots with p-values
+pwc <- pwc %>% add_xy_position(x = "Mesh_status", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "Mesh_status", y = "emmean") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) + 
+  stat_pvalue_manual(pwc, hide.ns = TRUE, tip.length = FALSE) +
+  labs(
+    subtitle = get_test_label(res.aov, detailed = TRUE),
+    caption = get_pwc_label(pwc)
+  )
+
+
+```
+#Figure 4 E-F
+```{r Extract and run prokayotic comparisons}
+#Get pristine verison of phyloseq
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_16S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_16S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_16S.csv")
+
+```
+```{r Reformat prokaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T | grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_16S_v0 = Temporary_df
+Temporary_df_16S = Temporary_df_16S_v0
+```
+```{r Extract and run rukayotic comparisons}
+#Get pristine verison of phyloseq
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_18S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_18S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_18S.csv")
+
+```
+```{r Reformat eukaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("2", Temporary_df$Var1[i]) == T | grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_18S_v0 = Temporary_df
+Temporary_df_18S = Temporary_df_18S_v0
+```
+```{r Combine prokaryotic and eukaryotic comparisons}
+Temporary_df_16S_v0$Sequencing = as.factor("Prokaryotes")
+Temporary_df_18S_v0$Sequencing = as.factor("Eukaryotes")
+
+Temporary_df = rbind(Temporary_df_16S_v0, Temporary_df_18S_v0)
+Temporary_df_v0 = Temporary_df
+
+
+```
+```{r Subset to needed comparisons and make plot}
+#Subset to useable ones
+Temporary_df = subset(Temporary_df_v0, 
+                      Var2 == "6aeza" | Var2 =="6aezb" | Var2 =="6aezc" |Var2 =="6amzb"|Var2 == "6gezb" |Var2 =="6gezc" |Var2 =="6gmza" |Var2 =="6gmzc" |Var2 =="6peza" |Var2 =="6pezb" |Var2 =="6pezc" |Var2 =="6pmza" |Var2 =="6pmzb" |Var2 =="6pmzc" |Var2 =="6teza" |Var2 =="6tezb" |Var2 =="6tezc" |Var2 =="6tmza" |Var2 =="6tmzb")
+
+#Make sure it worked
+Temporary_df_2 = Temporary_df
+
+#Summarise for plotting
+Temporary_df_2 = summarySE(Temporary_df_2, measurevar="Bray_dissimilarity", groupvars=c("Sample_time", "Mesh_status", "Substrate", "Sequencing", "StageofBiofilm"))
+
+#Remove uneeded comparisons
+Temporary_df_2 = subset(Temporary_df_2, !Substrate == "Mesh")
+Temporary_df_2 = subset(Temporary_df_2, !Substrate == "Water")
+
+#Clean up and reorder
+Temporary_df_2$Sequencing = factor(Temporary_df_2$Sequencing,
+                                   levels = c("Prokaryotes", "Eukaryotes"))
+Temporary_df_2$Sample_time = factor(Temporary_df_2$Sample_time,
+                         levels=c("7", "14", "19", "28", "42", "56"))
+Temporary_df_2$Substrate <- factor(Temporary_df_2$Substrate,
+                         levels=c("Plastic", "Glass", "Tile", "Wood", "Water"))
+
+#Subset for cleaner downstream plotting
+Temporary_df_2_16S = subset(Temporary_df_2, Sequencing == "Prokaryotes")
+Temporary_df_2_18S = subset(Temporary_df_2, Sequencing == "Eukaryotes")
+
+
+#Plot
+Plot_bray_D56_16S = ggplot(Temporary_df_2_16S, aes(x= Sample_time, y = Bray_dissimilarity, colour = Substrate, group = Substrate)) + 
+  geom_line(lwd = 1)+
+      geom_errorbar(aes(ymin=(Bray_dissimilarity-se), 
+                    ymax=(Bray_dissimilarity+se),
+                    colour = Substrate),
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  scale_color_manual("Condition", values = Substrate_colour_list)+
+  theme_bw()+
+  My_Theme+
+  xlab("Time (days)")+
+  ylab("Bray-Curtis dissimilarity")+
+  scale_y_continuous(limits = c(0.5,1), breaks = c(0.6, 0.8, 1))
+  
+
+Plot_bray_D56_16S
+
+Plot_bray_D56_18S = ggplot(Temporary_df_2_18S, aes(x= Sample_time, y = Bray_dissimilarity, colour = Substrate, group = Substrate)) + 
+  geom_line(lwd = 1)+
+      geom_errorbar(aes(ymin=(Bray_dissimilarity-se), 
+                    ymax=(Bray_dissimilarity+se),
+                    colour = Substrate),
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  scale_color_manual("Condition", values = Substrate_colour_list)+
+  theme_bw()+
+  My_Theme+
+  xlab("Time (days)")+
+  ylab("Bray-Curtis dissimilarity")+
+  scale_y_continuous(limits = c(0.5,1), breaks = c(0.6, 0.8, 1))
+
+Plot_bray_D56_18S
+
+```
+```{r Stats and gradient}
+Diss_16S_df = subset(Temporary_df_2, Sequencing == "Prokaryotes")
+Diss_18S_df = subset(Temporary_df_2, Sequencing == "Eukaryotes")
+
+####Sequencing effects####
+wilcox.test(Bray_dissimilarity ~ Sequencing, data = Temporary_df_2)
+
+test_mean = Temporary_df_2 %>% 
+  group_by(Sequencing) %>% 
+  summarise(mean_val = mean(Bray_dissimilarity), sd = sd(Bray_dissimilarity))
+print(test_mean)
+test_mean$mean_val[2]- test_mean$mean_val[1]
+
+####Sample_time effects####
+kruskal.test(Bray_dissimilarity ~ Sample_time, data = Temporary_df_2)
+kruskal.test(Bray_dissimilarity ~ Sample_time, data = Diss_16S_df)
+kruskal.test(Bray_dissimilarity ~ Sample_time, data = Diss_18S_df)
+
+pairwise.wilcox.test(Diss_16S_df$Bray_dissimilarity, Diss_16S_df$Sample_time, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Diss_18S_df$Bray_dissimilarity, Diss_18S_df$Sample_time, p.adjust.method = "bonferroni")
+
+wilcox.test(Diss_16S_df$Bray_dissimilarity ~ Diss_16S_df$StageofBiofilm, p.adjust.method = "bonferroni")
+wilcox.test(Diss_18S_df$Bray_dissimilarity ~ Diss_18S_df$StageofBiofilm, p.adjust.method = "bonferroni")
+
+test_mean = Temporary_df_2 %>% 
+  group_by(Sequencing, Sample_time) %>% 
+  summarise(mean_val = mean(Bray_dissimilarity ), sd = sd(Bray_dissimilarity ))
+print(test_mean)
+test_mean$mean_val[5]-test_mean$mean_val[6]
+test_mean$mean_val[11]-test_mean$mean_val[12]
+
+####Substrate effects####
+kruskal.test(Bray_dissimilarity ~ Substrate, data = Temporary_df_2)
+kruskal.test(Bray_dissimilarity ~ Substrate, data = Diss_16S_df)
+kruskal.test(Bray_dissimilarity ~ Substrate, data = Diss_18S_df)
+
+pairwise.wilcox.test(Diss_16S_df$Bray_dissimilarity, Diss_16S_df$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Diss_18S_df$Bray_dissimilarity, Diss_18S_df$Substrate, p.adjust.method = "bonferroni")
+
+####Predation effects####
+wilcox.test(Bray_dissimilarity ~ Mesh_status, data = Temporary_df_2)
+wilcox.test(Bray_dissimilarity ~ Mesh_status, data = Diss_16S_df)
+wilcox.test(Bray_dissimilarity ~ Mesh_status, data = Diss_18S_df)
+
+test_mean = Diss_16S_df %>% 
+  group_by(Mesh_status) %>% 
+  summarise(mean_val = mean(Bray_dissimilarity), sd = sd(Bray_dissimilarity))
+print(test_mean)
+
+
+####Extract gradient####
+Diss_16S_df_expo = subset(Diss_16S_df, Mesh_status == "Non-enclosed")
+Diss_16S_df_enclo = subset(Diss_16S_df, Mesh_status == "Enclosed")
+Diss_18S_df_expo = subset(Diss_18S_df, Mesh_status == "Non-enclosed")
+Diss_18S_df_enclo = subset(Diss_18S_df, Mesh_status == "Enclosed")
+
+nrow(Diss_16S_df_expo)
+nrow(Diss_16S_df_enclo)
+Diss_16S_df_enclo_noG = subset(Diss_16S_df_enclo, !Substrate == "Glass")
+nrow(Diss_16S_df_enclo_noG)
+Diss_16S_df_enclo_17 = Diss_16S_df_enclo_noG[-15,]
+nrow(Diss_16S_df_enclo_17)
+r.expo_16S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_16S_df_expo)
+r.enclo_16S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_16S_df_enclo_17)
+summary(anova(r.expo_16S, r.enclo_16S))
+summary(r.expo_16S)
+summary(r.enclo_16S)
+
+r.expo_16S$coefficients[2] - r.enclo_16S$coefficients[2] 
+#Non-enclosed communities are 0.2% more different per day
+
+nrow(Diss_18S_df_expo)
+nrow(Diss_18S_df_enclo)
+Diss_18S_df_enclo_noG = subset(Diss_18S_df_enclo, !Substrate == "Glass")
+nrow(Diss_18S_df_enclo_noG)
+Diss_18S_df_enclo_17 = Diss_18S_df_enclo_noG[-15,]
+nrow(Diss_18S_df_enclo_17)
+r.expo_18S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_18S_df_expo)
+r.enclo_18S <- lm(Bray_dissimilarity ~ as.numeric(as.character(Sample_time)),
+                 data = Diss_18S_df_enclo_17)
+summary(anova(r.expo_18S, r.enclo_18S))
+summary(r.expo_18S)
+summary(r.enclo_18S)
+
+r.expo_18S$coefficients[2] - r.enclo_18S$coefficients[2] 
+
+
+####16S gradient between mesh####
+#https://www.datanovia.com/en/lessons/ancova-in-r/
+Diss_16S_df$Sample_time = as.numeric(as.character(Diss_16S_df$Sample_time))
+ggscatter(
+  Diss_16S_df, x = "Sample_time", y = "Bray_dissimilarity",
+  color = "Mesh_status", add = "reg.line"
+  )+
+  stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..rr.label.., sep = "~~~~"), color = Mesh_status)
+    )
+
+Diss_16S_df %>% anova_test(Bray_dissimilarity ~ Mesh_status*Sample_time)
+#No interaction
+
+# Fit the model, the covariate goes first
+model <- lm(Bray_dissimilarity ~ Sample_time + Mesh_status, data = Diss_16S_df)
+# Inspect the model diagnostic metrics
+model.metrics <- augment(model) %>%
+  select(-.hat, -.sigma, -.fitted, -.se.fit) # Remove details
+head(model.metrics, 3)
+
+# Assess normality of residuals using shapiro wilk test
+shapiro_test(model.metrics$.resid) #Non-significant shapiro test
+
+#Homogeneity of variances
+model.metrics %>% levene_test(.resid ~ Mesh_status) #No significant differences between homogeneity
+
+#Outliers
+model.metrics %>% 
+  filter(abs(.std.resid) > 3) %>%
+  as.data.frame()
+#No outliers
+
+#Computation
+res.aov <- Diss_16S_df %>% anova_test(Bray_dissimilarity ~ Sample_time + Mesh_status)
+get_anova_table(res.aov)
+
+#Pairwise comparisons
+library(emmeans)
+pwc <- Diss_16S_df %>% 
+  emmeans_test(
+    Bray_dissimilarity ~ Mesh_status, covariate = Sample_time,
+    p.adjust.method = "bonferroni"
+    )
+pwc
+
+# Display the adjusted means of each Mesh_status
+# Also called as the estimated marginal means (emmeans)
+get_emmeans(pwc)
+
+
+
+
+# Visualization: line plots with p-values
+pwc <- pwc %>% add_xy_position(x = "Mesh_status", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "Mesh_status", y = "emmean") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) + 
+  stat_pvalue_manual(pwc, hide.ns = TRUE, tip.length = FALSE) +
+  labs(
+    subtitle = get_test_label(res.aov, detailed = TRUE),
+    caption = get_pwc_label(pwc)
+  )
+
+####18S gradient between mesh - assumptions not met####
+Diss_18S_df$Sample_time = as.numeric(as.character(Diss_18S_df$Sample_time))
+ggscatter(
+  Diss_18S_df, x = "Sample_time", y = "Bray_dissimilarity",
+  color = "Mesh_status", add = "reg.line"
+  )+
+  stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..rr.label.., sep = "~~~~"), color = Mesh_status)
+    )
+
+Diss_18S_df %>% anova_test(Bray_dissimilarity ~ Mesh_status*Sample_time)
+#No interaction
+
+# Fit the model, the covariate goes first
+model <- lm(Bray_dissimilarity ~ Sample_time + Mesh_status, data = Diss_18S_df)
+# Inspect the model diagnostic metrics
+model.metrics <- augment(model) %>%
+  select(-.hat, -.sigma, -.fitted, -.se.fit) # Remove details
+head(model.metrics, 3)
+
+# Assess normality of residuals using shapiro wilk test
+shapiro_test(model.metrics$.resid) #Significant differences - assumptions not met
+
+#Homogeneity of variances
+model.metrics %>% levene_test(.resid ~ Mesh_status) #Significant differences - assumption not met
+
+#Outliers
+model.metrics %>% 
+  filter(abs(.std.resid) > 3) %>%
+  as.data.frame()
+#Identified an outlier
+
+#Computation
+res.aov <- Diss_18S_df %>% anova_test(Bray_dissimilarity ~ Sample_time + Mesh_status)
+get_anova_table(res.aov)
+
+#Pairwise comparisons
+library(emmeans)
+pwc <- Diss_18S_df %>% 
+  emmeans_test(
+    Bray_dissimilarity ~ Mesh_status, covariate = Sample_time,
+    p.adjust.method = "bonferroni"
+    )
+pwc
+
+# Display the adjusted means of each Mesh_status
+# Also called as the estimated marginal means (emmeans)
+get_emmeans(pwc)
+
+
+
+
+# Visualization: line plots with p-values
+pwc <- pwc %>% add_xy_position(x = "Mesh_status", fun = "mean_se")
+ggline(get_emmeans(pwc), x = "Mesh_status", y = "emmean") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) + 
+  stat_pvalue_manual(pwc, hide.ns = TRUE, tip.length = FALSE) +
+  labs(
+    subtitle = get_test_label(res.aov, detailed = TRUE),
+    caption = get_pwc_label(pwc)
+  )
+```
+#Combine everything into one figure
+```{r}
+
+#Make NMDS component
+Top = ggarrange(NMDS_16S_noA,
+                   NMDS_18S_noA,
+                   common.legend = T,
+                   legend = "right",
+                   nrow = 1,
+                   labels = c("A", "B"),
+                align = "hv")
+#Inspect
+Top
+
+Bottom = ggarrange(Plot_bray_D7_16S, Plot_bray_D7_18S,
+                   Plot_bray_D56_16S, Plot_bray_D56_18S,
+                   common.legend = T,
+                   legend = "right",
+                   nrow = 2,
+                   ncol = 2,
+                   labels = c("C", "D",
+                              "E", "F"),
+                align = "hv")
+#Inspect
+Bottom
+
+#Combine and plot
+Figure5 = ggarrange(Top,
+                Bottom,
+                common.legend = F,
+                nrow = 2,
+                heights = c(1,2))
+
+#Inspect
+Figure5
+
+#Save plot
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/Figure5_BiofilmConvergence.pdf", width = 16, height = 20)
+Figure5
+dev.off()
+
+```

@@ -1,0 +1,371 @@
+---
+title: "Marine water taxonomic composition"
+author: "Sven Tobias-Hunefeldt"
+date: "26/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script
+```{r Load packages}
+
+library(phyloseq)
+library(ggplot2)
+library(ggpubr)
+library(vegan)
+library(reshape2)
+library(dplyr)
+library(forcats)
+
+#Arrange colour pallete
+cbbPalette_Family <- c("Bacteroidetes" = "#E69F00", #Orange
+                "Proteobacteria" =  "#56B4E9", #Blue (light)
+                "Cyanobacteria" = "#009E73", #Sea green
+                "Euryarchaeota" = "#CC79A7", #Magenta (light)
+                "Verrucomicrobia" = "#F0E442", #Yellow
+                "Epsilonbacteraeota" = "#0072B2", #Blue
+                "Ochrophyta" = "#D55E00", #Burnt orange
+                "Chlorophyta_ph" = "dodgerblue4",
+                "Dinoflagellata" = "rosybrown",
+                "Cryptomonadales" = "floralwhite",
+                "Arthropoda" = "lightgoldenrod4",
+                "Ciliophora" = "cornsilk3",
+                "Ascomycota" = "coral4",
+                "Tunicata" = "gray38",
+                "Florideophycidae" = "turquoise4",
+                "MAST-6" = "springgreen3",
+                "Mollusca" = "slateblue3",
+                "MAST-12" = "forestgreen",
+                "Annelida" = "lightgreen",
+                "Rare Taxa (< 1%)" = "black") 
+
+```
+#Prokaryotes
+```{r Calculate }
+#Subset samples to only water
+Water_phyloseq = subset_samples(Phyloseq_Biofilm_16S_v0, Substrate == "Water")
+
+#Convert phyloseq object into a edgeR object
+dge_EdgeR_obj_Time = phyloseq_to_edgeR(Water_phyloseq, group = "Sample_time")
+
+# Perform binary test
+et_EdgeR_Time = exactTest(dge_EdgeR_obj_Time)
+# Extract values from test results
+tt_EdgeR_Time = topTags(et_EdgeR_Time, n = nrow(dge_EdgeR_obj_Time$table), adjust.method = "BH", sort.by = "PValue")
+res_EdgeR_Time = tt_EdgeR_Time@.Data[[1]]
+#Subset to only significant
+sigtab_2fold_EdgeR_Time<- subset(res_EdgeR_Time, PValue < 0.05 & logFC >= 2 | PValue < 0.05 & logFC <= -2)
+
+
+#Keep only FDR corrected <.1
+sigtab_2fold_FDR_Time <- subset(sigtab_2fold_EdgeR_Time, FDR < 0.1)
+
+keepTaxa_FDR_Time <- sigtab_2fold_EdgeR_Time$Genus #Extract the OTU table that was shown to be significant
+Twofold_FDR_Time <- subset_taxa(Water_phyloseq, Genus %in% keepTaxa_FDR_Time) #Subset the taxa by the OTUs that were shown to change significantly
+dat_2fold_FDR_Time <- tax_glom(Twofold_FDR_Time, taxrank = 'Phylum') %>%#Merge the species at the Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt() #Melt it into a dataframe
+
+dat_2fold_FDR_Time <- dat_2fold_FDR_Time[order(dat_2fold_FDR_Time$Phylum),] #Order them at the Phylum level
+
+dat_2fold_FDR_Time$Phylum <- as.character(dat_2fold_FDR_Time$Phylum)
+  # group dataframe by Phylum, calculate relative abundance
+
+#Remove na values
+dat_2fold_FDR_Time$Abundance[grep(NaN, dat_2fold_FDR_Time$Abundance)] = 0
+
+#Calculate mean abudance of phyla
+medians_Time <- ddply(dat_2fold_FDR_Time, ~Phylum, function(x) c(median=mean(x$Abundance)))
+  # find Phyla whose rel. abund. is less than 1%
+remainder_Time <- medians_Time[medians_Time$median <= 0.01,]$Phylum
+  # change their name to "Remainder"
+dat_2fold_FDR_Time[dat_2fold_FDR_Time$Phylum %in% remainder_Time,]$Phylum <- 'Rare Taxa (< 1%)'
+
+#Sumamrise for plotting
+Summary_Time <- summarySE(dat_2fold_FDR_Time, measurevar="Abundance", groupvars=c("Kingdom", 
+                                                                                  "Phylum", 
+                                                                                  "Mesh_status", 
+                                                                                  "Sample_time", 
+                                                                                  "Substrate"))
+#Make sure summary worked
+Summary_Time
+
+#Rearrange for easier reading
+Summary_Time<-dplyr::arrange(Summary_Time,Phylum, Abundance)
+#Only retain unique phyla levels
+Summary_Time$Phylum <- factor(Summary_Time$Phylum,
+                         levels=(unique(Summary_Time$Phylum)))
+#Make sure nothing needs to be renamed for logical sense
+unique(Summary_Time$Phylum)
+
+##Only retain unique substrate levels
+Summary_Time$Substrate <- factor(Summary_Time$Substrate,
+                         levels=(unique(Summary_Time$Substrate)))
+#Make sure it worked
+levels(Summary_Time$Substrate)
+
+#Check for weird names and make Rare taxa name better.
+Summary_Time$Organism_type = as.factor("x")
+Summary_Time$Organism_type <- factor(Summary_Time$Organism_type,
+                         levels=c("Autotroph", "Heterotroph", "Mixotroph", "Unknown"))
+Summary_Time$Organism_type[grep("Cyanobacteria", Summary_Time$Phylum)] = as.factor("Autotroph")
+Summary_Time$Organism_type[grep("Epsilonbacteraeota", Summary_Time$Phylum)] = as.factor("Autotroph")
+
+Summary_Time$Organism_type[grep("Bacteroidetes", Summary_Time$Phylum)] = as.factor("Heterotroph")
+Summary_Time$Organism_type[grep("Verrucomicrobia", Summary_Time$Phylum)] = as.factor("Heterotroph")
+
+Summary_Time$Organism_type[grep("Proteobacteria", Summary_Time$Phylum)] = as.factor("Mixotroph")
+
+Summary_Time$Organism_type[grep("Rare Taxa", Summary_Time$Phylum)] = as.factor("Unknown")
+Summary_Time$Organism_type[grep("Planctomycetes", Summary_Time$Phylum)] = as.factor("Unknown")
+
+#Keep for records
+#write.csv(Summary_Time, file = "Summary_WaterTime_Phylum_16S.csv")
+
+```
+```{r Make plot}
+#Subset so only known taxa are seen
+Summary_Time_Phylum_noUnknown = subset(Summary_Time, Organism_type!="Unknown")
+
+#Make time a factor for easier plotting - and reorder for logical sense
+Summary_Time$Sample_time = as.factor(as.character(Summary_Time$Sample_time))
+Summary_Time$Sample_time = factor(Summary_Time$Sample_time,
+                         levels=c("0",
+                                  "7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+
+#Make plot
+Summary_plot_Time_16S <- ggplot(Summary_Time, 
+                        aes(x=Sample_time, 
+                            y=Abundance*100, 
+                            colour = fct_reorder(Phylum, Abundance, .fun = mean, .desc = T),
+                          #  linetype=Organism_type,
+                            group = Phylum))+ 
+  geom_line(stat = "identity", lwd = 1) + 
+  geom_errorbar(aes(ymin=(Abundance-se)*100, 
+                    ymax=(Abundance+se)*100, 
+                    colour = Phylum),
+                position=pd
+                )+
+  theme_bw()+
+    theme(legend.position = "right", 
+        strip.background = element_blank())+
+  xlab("Time (days)")+
+  ylab("Mean relative abundance (%)")+
+  scale_colour_manual("Prokaryotes", values = cbbPalette_Family)+
+  facet_grid(. ~ "Prokaryotes")+
+ # scale_linetype_manual("Organism type", 
+  #                      values = c("solid", "dotted", "dashed"), 
+   #                     labels = c("Primary producer", "Heterotroph", "Mixotroph"),
+    #                    breaks = c("Autotroph", "Heterotroph", "Mixotroph"))+
+  theme_bw()+
+  My_Theme#+
+  #guides(colour = guide_legend(title = "Eukaryotes"))
+
+#Show plot
+Summary_plot_Time_16S
+
+```
+```{r Calculate means}
+test_mean = dat_2fold_FDR_Time %>% 
+  group_by(Phylum) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+test_mean = dat_2fold_FDR_Time %>% 
+  group_by(Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+test_mean = dat_2fold_FDR_Time %>% 
+  group_by(Phylum, Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+```
+#Eukaryotes
+```{r Calculate}
+#Subset samples to only water
+Water_phyloseq = subset_samples(Phyloseq_Biofilm_18S_v0, Substrate == "Water")
+
+#Convert phyloseq object into a edgeR object
+dge_EdgeR_obj_Time = phyloseq_to_edgeR(Water_phyloseq, group = "Sample_time")
+
+# Perform binary test
+et_EdgeR_Time = exactTest(dge_EdgeR_obj_Time)
+# Extract values from test results
+tt_EdgeR_Time = topTags(et_EdgeR_Time, n = nrow(dge_EdgeR_obj_Time$table), adjust.method = "BH", sort.by = "PValue")
+res_EdgeR_Time = tt_EdgeR_Time@.Data[[1]]
+#Subset to only significant
+sigtab_2fold_EdgeR_Time<- subset(res_EdgeR_Time, PValue < 0.05 & logFC >= 2 | PValue < 0.05 & logFC <= -2)
+
+
+#Keep only FDR corrected <.1
+sigtab_2fold_FDR_Time <- subset(sigtab_2fold_EdgeR_Time, FDR < 0.1)
+
+keepTaxa_FDR_Time <- sigtab_2fold_EdgeR_Time$Genus #Extract the OTU table that was shown to be significant
+Twofold_FDR_Time <- subset_taxa(Water_phyloseq, Genus %in% keepTaxa_FDR_Time) #Subset the taxa by the OTUs that were shown to change significantly
+dat_2fold_FDR_Time <- tax_glom(Twofold_FDR_Time, taxrank = 'Phylum') %>%#Merge the species at the Phylum level
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% #Extract abundance data from phyloseq object
+  psmelt() #Melt it into a dataframe
+
+dat_2fold_FDR_Time <- dat_2fold_FDR_Time[order(dat_2fold_FDR_Time$Phylum),] #Order them at the Phylum level
+
+dat_2fold_FDR_Time$Phylum <- as.character(dat_2fold_FDR_Time$Phylum)
+  # group dataframe by Phylum, calculate relative abundance
+
+#Remove na values
+dat_2fold_FDR_Time$Abundance[grep(NaN, dat_2fold_FDR_Time$Abundance)] = 0
+
+#Calculate mean abudance of phyla
+medians_Time <- ddply(dat_2fold_FDR_Time, ~Phylum, function(x) c(median=mean(x$Abundance)))
+  # find Phyla whose rel. abund. is less than 1%
+remainder_Time <- medians_Time[medians_Time$median <= 0.01,]$Phylum
+  # change their name to "Remainder"
+dat_2fold_FDR_Time[dat_2fold_FDR_Time$Phylum %in% remainder_Time,]$Phylum <- 'Rare Taxa (< 1%)'
+
+#Sumamrise for plotting
+Summary_Time <- summarySE(dat_2fold_FDR_Time, measurevar="Abundance", groupvars=c("Kingdom", 
+                                                                                  "Phylum", 
+                                                                                  "Mesh_status", 
+                                                                                  "Sample_time", 
+                                                                                  "Substrate"))
+#Make sure summary worked
+Summary_Time
+
+#Rearrange for easier reading
+Summary_Time<-dplyr::arrange(Summary_Time,Phylum, Abundance)
+#Only retain unique phyla levels
+Summary_Time$Phylum <- factor(Summary_Time$Phylum,
+                         levels=(unique(Summary_Time$Phylum)))
+#Make sure nothing needs to be renamed for logical sense
+unique(Summary_Time$Phylum)
+
+##Only retain unique substrate levels
+Summary_Time$Substrate <- factor(Summary_Time$Substrate,
+                         levels=(unique(Summary_Time$Substrate)))
+#Make sure it worked
+levels(Summary_Time$Substrate)
+
+#Check for weird names and make Rare taxa name better.
+Summary_Time$Organism_type = as.factor("x")
+Summary_Time$Organism_type <- factor(Summary_Time$Organism_type,
+                         levels=c("Autotroph", "Heterotroph", "Mixotroph", "Unknown"))
+Summary_Time$Organism_type[grep("Cyanobacteria", Summary_Time$Phylum)] = as.factor("Autotroph")
+Summary_Time$Organism_type[grep("Epsilonbacteraeota", Summary_Time$Phylum)] = as.factor("Autotroph")
+
+Summary_Time$Organism_type[grep("Bacteroidetes", Summary_Time$Phylum)] = as.factor("Heterotroph")
+Summary_Time$Organism_type[grep("Verrucomicrobia", Summary_Time$Phylum)] = as.factor("Heterotroph")
+
+Summary_Time$Organism_type[grep("Proteobacteria", Summary_Time$Phylum)] = as.factor("Mixotroph")
+
+Summary_Time$Organism_type[grep("Rare Taxa", Summary_Time$Phylum)] = as.factor("Unknown")
+Summary_Time$Organism_type[grep("Planctomycetes", Summary_Time$Phylum)] = as.factor("Unknown")
+
+#Keep for records
+#write.csv(Summary_Time, file = "Summary_WaterTime_Phylum_18S.csv")
+
+```
+```{r Make plot}
+#Subset so only known taxa are seen
+Summary_Time_Phylum_noUnknown = subset(Summary_Time, Organism_type!="Unknown")
+
+#Make time a factor for easier plotting - and reorder for logical sense
+Summary_Time$Sample_time = as.factor(as.character(Summary_Time$Sample_time))
+Summary_Time$Sample_time = factor(Summary_Time$Sample_time,
+                         levels=c("0",
+                                  "7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+
+#Make plot
+Summary_plot_Time_18S <- ggplot(Summary_Time, 
+                        aes(x=Sample_time, 
+                            y=Abundance*100, 
+                            colour = fct_reorder(Phylum, Abundance, .fun = mean, .desc = T),
+                          #  linetype=Organism_type,
+                            group = Phylum))+ 
+  geom_line(stat = "identity", lwd = 1) + 
+  geom_errorbar(aes(ymin=(Abundance-se)*100, 
+                    ymax=(Abundance+se)*100, 
+                    colour = Phylum),
+                position=pd
+                )+
+  theme_bw()+
+    theme(legend.position = "right", 
+        strip.background = element_blank())+
+  xlab("Time (days)")+
+  ylab("Mean relative abundance (%)")+
+  scale_colour_manual("Eukaryotes", values = cbbPalette_Family)+
+  facet_grid(. ~ "Eukaryotes")+
+ # scale_linetype_manual("Organism type", 
+  #                      values = c("solid", "dotted", "dashed"), 
+   #                     labels = c("Primary producer", "Heterotroph", "Mixotroph"),
+    #                    breaks = c("Autotroph", "Heterotroph", "Mixotroph"))+
+  theme_bw()+
+  My_Theme#+
+  #guides(colour = guide_legend(title = "Eukaryotes"))
+
+#Show plot
+Summary_plot_Time_18S
+
+```
+```{r Calculate means}
+test_mean = dat_2fold_FDR_Time %>% 
+  group_by(Phylum) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+test_mean = dat_2fold_FDR_Time %>% 
+  group_by(Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+test_mean = dat_2fold_FDR_Time %>% 
+  group_by(Phylum, Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Abundance), sd = sd(Abundance))
+print(test_mean)
+
+```
+#Final figure plot
+```{r}
+#Make legend only plot
+Legend_16S = get_legend(Summary_plot_Time_16S)
+Legend_18S = get_legend(Summary_plot_Time_18S)
+#Remove legend from actual plots
+Summary_plot_Time_16S = Summary_plot_Time_16S + theme(legend.position = "none")
+Summary_plot_Time_18S = Summary_plot_Time_18S + theme(legend.position = "none")
+
+#Combine legends into new plot
+Both_Legends = ggarrange(as_ggplot(Legend_16S),
+                               as_ggplot(Legend_18S),
+                               ncol = 2,
+                               common.legend = T,
+                               legend = "right")
+#Make sure it worked
+Both_Legends
+
+#Plot everything
+MarineWater_Taxa = ggarrange(Summary_plot_Time_16S,
+          Summary_plot_Time_18S,
+          Both_Legends,
+          nrow = 1,
+          common.legend = F)
+#Save plot
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/SupplementaryFigure3_MarineWater_Taxa.pdf", width = 16, height = 6.66)
+MarineWater_Taxa
+dev.off()
+```
+

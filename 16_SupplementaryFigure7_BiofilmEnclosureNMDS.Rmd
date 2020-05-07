@@ -1,0 +1,158 @@
+---
+title: '#Biofilm NMDS by enclosure status and developmental stage'
+author: "Sven Tobias-Hunefeldt"
+date: "27/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script
+
+```{r load packages}
+
+library(ggpubr)
+library(ggplot2)
+library(Rmisc)
+library(vegan)
+library(phyloseq)
+
+
+```
+```{r Refine colours and shapes}
+#Refine colours
+cbbPalette <- c("black",
+                "red",
+                "navy", 
+                "green", 
+                "magenta",
+                "forestgreen",
+                "turquoise")
+
+Mesh_Palette = c("Enclosed" = "#000000",
+                 "Non-enclosed" = "#E69F00")
+
+Time_colour_list = c("0" = "turquoise", 
+                     "7" = "forestgreen", 
+                     "14" = "black", 
+                     "19" = "red", 
+                     "28" = "navy", 
+                     "42" = "green", 
+                     "56" = "magenta")
+
+#Refine shape list
+Substrate_shape_list = c("Plastic" = 15, #Filled square 
+                         "Glass" = 16, #Filled circle
+                         "Tile" = 17, #Filled Triangle
+                         "Wood" = 5, #Hollow diamond
+                         "Water" = 11) #Lined star
+#Make colour lists
+Substrate_colour_list = c("Plastic" = "black",
+                  "Glass" = "green",
+                  "Tile" = "blue",
+                  "Wood" = "magenta")
+
+```
+#Recolour Figure 3 F
+```{r}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Subset to only biofilm samples
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Convert and reorder time for plotting
+sample_data(Phyloseq_Biofilm_16S_noA)$Sample_time<-as.factor(as.character(sample_data(Phyloseq_Biofilm_16S_noA)$Sample_time))
+sample_data(Phyloseq_Biofilm_16S_noA)$Sequencing <-as.factor("Prokaryotes")
+sample_data(Phyloseq_Biofilm_16S_noA)$Mesh_status = gsub("Exposed", "Non-enclosed", sample_data(Phyloseq_Biofilm_16S_noA)$Mesh_status)
+
+#Calculate ordination matrix based on Bray-Curtis dissimilarity
+NMDS.ord_16S_noA <- ordinate(Phyloseq_Biofilm_16S_noA, method = "NMDS", distance = "bray")
+#Ensure data is good fit
+stressplot(NMDS.ord_16S_noA) #Good stressplot
+NMDS.ord_16S_noA #Good level of stress
+
+#Design plot
+NMDS_16S_noA = plot_ordination(Phyloseq_Biofilm_16S_noA, 
+                             NMDS.ord_16S_noA, 
+                             shape = "Mesh_status", 
+                             color = "StageofBiofilm"
+                             ) + 
+  theme(legend.position = "right")+
+  stat_ellipse(aes(group = StageofBiofilm), lwd = 1)+
+  scale_color_manual("Developmental \nstage", values = cbbPalette)+
+  scale_shape_manual("Condition", values = c(16, 2))+
+  geom_point(aes(size = 6), show.legend = F)+
+  facet_grid(. ~ Sequencing)+
+  annotate("text", x=-3.5, y=3.25, size = 6, label= paste0("Stress = ", round(NMDS.ord_16S_noA$stress, digits = 3)))+
+  theme_bw()+
+  My_Theme+ 
+  guides(shape = guide_legend(override.aes = list(size = 4)))
+#Inspect plot
+NMDS_16S_noA
+
+```
+#Recolour Figure 3 G
+```{r}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Subset to only biofilm samples
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Convert and reorder time for plotting
+sample_data(Phyloseq_Biofilm_18S_noA)$Sample_time<-as.factor(as.character(sample_data(Phyloseq_Biofilm_18S_noA)$Sample_time))
+sample_data(Phyloseq_Biofilm_18S_noA)$Sequencing <-as.factor("Prokaryotes")
+sample_data(Phyloseq_Biofilm_18S_noA)$Mesh_status = gsub("Exposed", "Non-enclosed", sample_data(Phyloseq_Biofilm_18S_noA)$Mesh_status)
+
+#Calculate ordination matrix based on Bray-Curtis dissimilarity
+NMDS.ord_18S_noA <- ordinate(Phyloseq_Biofilm_18S_noA, method = "NMDS", distance = "bray")
+#Ensure data is good fit
+stressplot(NMDS.ord_18S_noA) #Good stressplot
+NMDS.ord_18S_noA #Good level of stress
+
+#Design plot
+NMDS_18S_noA = plot_ordination(Phyloseq_Biofilm_18S_noA, 
+                             NMDS.ord_18S_noA, 
+                             shape = "Mesh_status", 
+                             color = "StageofBiofilm"
+                             ) + 
+  theme(legend.position = "right")+
+  stat_ellipse(aes(group = StageofBiofilm),
+               lwd = 1)+
+  scale_color_manual("Developmental \nstage", values = cbbPalette)+
+  scale_shape_manual("Condition", values = c(16, 2))+
+  geom_point(aes(size = 6), show.legend = F)+
+  facet_grid(. ~ Sequencing)+
+  annotate("text", x=-2.5, y=2, size = 6, label= paste0("Stress = ", round(NMDS.ord_18S_noA$stress, digits = 3)))+
+  theme_bw()+
+  My_Theme+ 
+  guides(shape = guide_legend(override.aes = list(size = 4)))
+#Inspect plot
+NMDS_18S_noA
+
+```
+#Generate combined plots
+```{r}
+#Make plot
+SupplementaryFigure7 = ggarrange(NMDS_16S_noA,
+                                 NMDS_18S_noA,
+                                 common.legend = T,
+                                 legend = "right",
+                                 nrow = 1,
+                                 labels = c("AUTO"),
+                                 align = "hv")
+#Inspect
+SupplementaryFigure7
+
+#Save plot
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/SupplementaryFigure7_BiofilmEnclosureNMDS.pdf", width = 16, height = 6.66)
+SupplementaryFigure7
+dev.off()
+
+```
+

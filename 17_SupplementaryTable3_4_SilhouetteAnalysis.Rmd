@@ -1,0 +1,217 @@
+---
+title: "Silhouette analysis"
+author: "Sven Tobias-Hunefeldt"
+date: "30/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script
+
+```{r load packages}
+
+library(ggpubr)
+library(ggplot2)
+library(phyloseq)
+library(cluster)
+
+```
+
+#Prokaryotic silhouette analysis
+Two clusters shows the lowest number of samples below 0 (9 vs 3's 10) while also retaining a high intra-group value
+```{r}
+
+#Restore a pristine copy from back up
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Extract otu table
+otutable_df_16S = as.data.frame(as.matrix(otu_table(Phyloseq_Biofilm_16S_noA)))
+nrow(otutable_df_16S)
+
+#2 clusters
+test2_16S = pam(otutable_df_16S, k = 2)
+Plot2_16S = recordPlot(plot(silhouette(test2_16S)))
+#This shows minimal number of misclassified samples
+
+
+test2_16S$clustering[test2_16S$clustering == 1]
+31/111 #Proportion that is from day 7 and 14
+
+test2_16S$clustering[test2_16S$clustering == 2]
+9/12 #Proportion that is from day 7 and 14
+
+#3 clusters
+test3_16S = pam(otutable_df_16S, k = 3)
+Plot3_16S = recordPlot(plot(silhouette(test3_16S)))
+
+test3_16S$clustering[test3_16S$clustering == 1]
+25/100 #Rest is made up of other mix of samples
+
+test3_16S$clustering[test3_16S$clustering == 2]
+9/12 #Mix of lots of day 19 samples
+
+test3_16S$clustering[test3_16S$clustering == 3]
+6/11 #Rest is made up of day 28-42 samples
+
+#4 clusters
+test4_16S = pam(otutable_df_16S, k = 4)
+Plot4_16S = recordPlot(plot(silhouette(test4_16S)))
+
+test4_16S$clustering[test4_16S$clustering == 1]
+11/14 #Proportion that is from day 7 and 14
+
+test4_16S$clustering[test4_16S$clustering == 2]
+14/35 #Proportion that is from day 7 and 14
+
+test4_16S$clustering[test4_16S$clustering == 3]
+9/63 #Proportion that is from day 7 and 14
+
+test4_16S$clustering[test4_16S$clustering == 4]
+6/11 #Proportion that is from day 7 and 14
+
+#5 clusters
+test5_16S = pam(otutable_df_16S, k = 5)
+Plot5_16S = recordPlot(plot(silhouette(test5_16S)))
+
+#6 clusters
+test6_16S = pam(otutable_df_16S, k = 6)
+Plot6_16S = recordPlot(plot(silhouette(test6_16S)))
+
+```
+#Eukaryotic silhouette analysis
+No seeming cluster effect - assessing day 7 clusteirng from everything else based on other evidence
+```{r}
+
+#Restore a pristine copy from back up
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+#Extract otu table
+otutable_df_18S = as.data.frame(as.matrix(otu_table(Phyloseq_Biofilm_18S_noA)))
+nrow(otutable_df_18S)
+
+#2 clusters
+test2_18S = pam(otutable_df_18S, k = 2)
+Plot2_18S = recordPlot(plot(silhouette(test2_18S)))
+#This shows minimal number of misclassified samples
+
+
+test2_18S$clustering[test2_18S$clustering == 1]
+38/110 #Proportion that is from day 7 and 14
+
+test2_18S$clustering[test2_18S$clustering == 2]
+3/20 #Proportion that is from day 7 and 14
+
+#3 clusters
+test3_18S = pam(otutable_df_18S, k = 3)
+Plot3_18S = recordPlot(plot(silhouette(test3_18S)))
+
+test3_18S$clustering[test3_18S$clustering == 1]
+7/7 #Pure day 7 samples
+
+test3_18S$clustering[test3_18S$clustering == 2]
+12/103 #Mix of lots of day 14-56 samples
+
+test3_18S$clustering[test3_18S$clustering == 3]
+0/20 #Rest is made up of day 28-42 samples
+
+#4 clusters
+test4_18S = pam(otutable_df_18S, k = 4)
+Plot4_18S = recordPlot(plot(silhouette(test4_18S)))
+
+test4_18S$clustering[test4_18S$clustering == 1]
+7/7 #Proportion that is from day 7
+
+test4_18S$clustering[test4_18S$clustering == 2]
+12/95 #Proportion that is from day 7
+
+test4_18S$clustering[test4_18S$clustering == 3]
+0/15 #Proportion that is from day 7 
+
+test4_18S$clustering[test4_18S$clustering == 4]
+0/13 #Proportion that is from day 7 and 14
+
+#5 clusters
+test5_18S = pam(otutable_df_18S, k = 5)
+Plot5_18S = recordPlot(plot(silhouette(test5_18S)))
+
+#6 clusters
+test6_18S = pam(otutable_df_18S, k = 6)
+Plot6_18S = recordPlot(plot(silhouette(test6_18S)))
+
+```
+#Make tables
+```{r Cluster assignment of samples}
+####Prokaryotes####
+#Extract dataframe for row name assignment
+rownamesfor_df = test2_16S$silinfo$widths
+#Reorder rownames for clarity and easier reading
+rownamesfor_df = as.data.frame(rownamesfor_df[order(row.names(rownamesfor_df)), ])
+#Make empty dataframe with correct row names
+SupplementaryTable_WidthsandClusters_16S = data.frame(row.names = rownames(rownamesfor_df))
+#Run loop
+for (i in 2:6) {
+  #Obtain object
+  Object = get(paste0("test", i, "_16S"))
+  #Extract needed info
+  ClusterAssign = Object$silinfo$widths
+  #Reorder rows
+  ArrCA = as.data.frame(ClusterAssign[order(row.names(ClusterAssign)), ])
+  #Remove neighbour column
+  ArrCA$neighbor = NULL
+  
+  #Rename columns
+  colnames(ArrCA) = c(paste0(i, " cluster assignment"),  paste0(i, " silhouette width"))
+
+  #Bind results together
+  SupplementaryTable_WidthsandClusters_16S = cbind(SupplementaryTable_WidthsandClusters_16S, ArrCA)
+  
+  i = i + 1
+}
+
+####Eukaryotes####
+#Extract dataframe for row name assignment
+rownamesfor_df = test2_18S$silinfo$widths
+#Reorder rownames for clarity and easier reading
+rownamesfor_df = as.data.frame(rownamesfor_df[order(row.names(rownamesfor_df)), ])
+#Make empty dataframe with correct row names
+SupplementaryTable_WidthsandClusters_18S = data.frame(row.names = rownames(rownamesfor_df))
+#Run loop
+for (i in 2:6) {
+  #Obtain object
+  Object = get(paste0("test", i, "_18S"))
+  #Extract needed info
+  ClusterAssign = Object$silinfo$widths
+  #Reorder rows
+  ArrCA = as.data.frame(ClusterAssign[order(row.names(ClusterAssign)), ])
+  #Remove neighbour column
+  ArrCA$neighbor = NULL
+  
+  #Rename columns
+  colnames(ArrCA) = c(paste0(i, " cluster assignment"),  paste0(i, " silhouette width"))
+
+  #Bind results together
+  SupplementaryTable_WidthsandClusters_18S = cbind(SupplementaryTable_WidthsandClusters_18S, ArrCA)
+  
+  i = i + 1
+}
+
+####Extract tables for thesis####
+
+write.csv(SupplementaryTable_WidthsandClusters_16S, "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Tables/Prokayotic_Cluster_Assignment.csv")
+write.csv(SupplementaryTable_WidthsandClusters_18S, "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Tables/Eukayotic_Cluster_Assignment.csv")
+
+```
+
+
+

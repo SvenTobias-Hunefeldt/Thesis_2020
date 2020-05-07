@@ -1,0 +1,29 @@
+---
+title: "Rarefication curve plotting"
+author: "Sven Tobias-Hunefeldt"
+date: "26/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Import rds objects
+```{r}
+Rarecurve_16S = readRDS("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/16S_Rarecurve.rds")
+Rarecurve_18S = readRDS("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/18S_Rarecurve.rds")
+```
+
+#Plot rarification curves
+```{r}
+RareCurve = ggarrange(Rarecurve_16S,
+          Rarecurve_18S,
+          common.legend = T,
+          legend = "right")
+
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/SupplementaryFigure1_RarefactionCurve.pdf", width = 16, height = 6.66)
+RareCurve
+dev.off()
+```

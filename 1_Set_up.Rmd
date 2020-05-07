@@ -1,0 +1,764 @@
+---
+title: "Import and clean data"
+author: "Sven Tobias-Hunefeldt"
+date: "26/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Make environment and functions
+```{r Set up environment}
+#Set seed to make results more reproducable
+set.seed(2)
+
+#Set up working directory
+setwd("~/Desktop/Biofilm_project/Analysis/Biofilm_Analysis/")
+
+#Define theme for plotting
+My_Theme = theme(axis.title.x = element_text(size=18),
+       # theme_grey(base_size = 22),
+        axis.text.x = element_text(angle=0, colour = "black", vjust=1, hjust = 0.5, size=18), 
+        axis.text.y = element_text(colour = "black", size=18),
+        axis.title.y = element_text(face="bold",size=18),
+        plot.title = element_text(size = 18),
+        legend.title =element_text(size = 18),
+        legend.text = element_text(size = 16),
+        legend.position="right",
+        legend.key.size = unit(1, "cm"),
+        strip.text.x = element_text(size=18, face="bold"),
+        strip.text.y = element_text(size=18, face="bold"),
+        #panel.background = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        strip.background = element_rect(colour="black"))
+
+#Phylum specific colours for consistency
+Phylum_colour_list <- c("Arthropoda" =  "black",
+                "Ciliophora" = "red",
+                "Cercozoa" = "violet",
+                "Euglenozoa" = "violetred4", 
+                "Florideophycidae" = "cornflowerblue",
+                "Incertae_Sedis_ph" = "",
+                "Nematoda" = "thistle3", 
+                "Ochrophyta" = "forestgreen",
+                "Bacteroidetes" = "darkred",
+                "Cyanobacteria" = "green",
+                "Epsilonbacteraeota" = "orange",
+                "Planctomycetes" = "turquoise",
+                "Proteobacteria" = "navy",
+                "Rare Taxa (< 1%)" = "black",
+                "Verrucomicrobia" = "magenta")
+
+#Colourblind friendly pallete
+cbbPalette <- c("black",
+                "red",
+                "navy", 
+                "green", 
+                "magenta",
+                "forestgreen")
+#If more options are needed
+#cbbPalette <- c("#000000", #Black
+ #               "#E69F00", #Orange
+  #              "#56B4E9", #Blue (light)
+   #             "#009E73", #Sea green
+    #            "#CC79A7", #Magenta (light)
+     #           "#F0E442", #Yellow
+      #          "#0072B2", #Blue
+       #         "#D55E00", #Burnt orange
+        #        "dodgerblue4",
+         #       "rosybrown",
+          #      "floralwhite",
+           #     "lightgoldenrod4",
+            #    "cornsilk3",
+             #   "coral4",
+              #  "gray38",
+               # "turquoise4",
+                #"springgreen3",
+#                "slateblue3",
+ #               "forestgreen",
+  #              "lightgreen") 
+
+#Shapes for ggplot2
+Shape_list = c(0, #Hollow square
+               15, #Filled square
+               1, #Hollow circle
+               16, #Filled circle
+               2, #Hollow triangle
+               17, #Filled triangle
+               5, #Hollow diamond
+               23) #Filled diamons
+                
+#Set up position dodge for ggplot2
+pd = position_dodge(0.15)
+
+#Sequencing status specific colours for consistency
+Organism_list = c("Prokaryotes" = "red",
+                  "Eukaryotes" = "navy")
+
+#Sequencing status specific colours for consistency
+#Organism_list = c("16S" = "red",
+ #                 "18S" = "navy")
+
+#Enclosure status specific colours for consistency
+Condition_list = c("Open" = "red",
+                  "Enclosed" = "black")
+```
+```{r Exact test function}
+
+#check open packages
+(.packages())
+##Close all but phyloseq
+detachAllPackages <- function() {
+  
+  basic.packages <- c("package:stats","package:graphics","package:grDevices","package:utils","package:datasets","package:methods","package:base")
+  
+  package.list <- search()[ifelse(unlist(gregexpr("package:",search()))==1,TRUE,FALSE)]
+  
+  package.list <- setdiff(package.list,basic.packages)
+  
+  if (length(package.list)>0)  for (package in package.list) detach(package, character.only=TRUE)
+  
+}
+
+detachAllPackages()
+
+
+library("phyloseq")
+packageVersion("phyloseq")
+library("edgeR")
+packageVersion("edgeR")
+library(phyloseq)
+library(ggplot2)
+library(plyr)
+library(scales)
+library(reshape)
+library(RColorBrewer)
+library(grid)
+library(empiricalFDR.DESeq2)
+library("DESeq2")
+library(dplyr)
+library(Rmisc)
+
+
+#' Convert phyloseq OTU count data into DGEList for edgeR package
+#' 
+#' Further details.
+#' 
+#' @param physeq (Required).  A \code{\link{phyloseq-class}} or
+#'  an \code{\link{otu_table-class}} object. 
+#'  The latter is only appropriate if \code{group} argument is also a 
+#'  vector or factor with length equal to \code{nsamples(physeq)}.
+#'  
+#' @param group (Required). A character vector or factor giving the experimental
+#'  group/condition for each sample/library. Alternatively, you may provide
+#'  the name of a sample variable. This name should be among the output of
+#'  \code{sample_variables(physeq)}, in which case
+#'  \code{get_variable(physeq, group)} would return either a character vector or factor.
+#'  This is passed on to \code{\link[edgeR]{DGEList}},
+#'  and you may find further details or examples in its documentation.
+#'  
+#' @param method (Optional). The label of the edgeR-implemented normalization to use.
+#'  See \code{\link[edgeR]{calcNormFactors}} for supported options and details. 
+#'  The default option is \code{'RLE'}, which is a scaling factor method 
+#'  proposed by Anders and Huber (2010).
+#'  At time of writing, the \link[edgeR]{edgeR} package supported 
+#'  the following options to the \code{method} argument:
+#'  
+#'  \code{c('TMM', 'RLE', 'upperquartile', 'none')}.
+#'
+#' @param ... Additional arguments passed on to \code{\link[edgeR]{DGEList}}
+#' 
+#' @examples
+#' 
+phyloseq_to_edgeR = function(physeq, group, method = "RLE", ...) {
+  require("edgeR")
+  require("phyloseq")
+  # Enforce orientation.
+  if (!taxa_are_rows(physeq)) {
+    physeq <- t(physeq)
+  }
+  x = as(otu_table(physeq), "matrix")
+  # Add one to protect against overflow, log(0) issues.
+  x = x + 1
+  # Check `group` argument
+  if (identical(all.equal(length(group), 1), TRUE) & nsamples(physeq) > 1) {
+    # Assume that group was a sample variable name (must be categorical)
+    group = get_variable(physeq, group)
+  }
+  # Define gene annotations (`genes`) as tax_table
+  taxonomy = tax_table(physeq, errorIfNULL=FALSE)
+  if( !is.null(taxonomy) ){
+    taxonomy = data.frame(as(taxonomy, "matrix"))
+  } 
+  # Now turn into a DGEList
+  y = DGEList(counts = x, group = group, genes = taxonomy, remove.zeros = TRUE, 
+              ...)
+  # Calculate the normalization factors
+  z = calcNormFactors(y, method = method)
+  # Check for division by zero inside `calcNormFactors`
+  if (!all(is.finite(z$samples$norm.factors))) {
+    stop("Something wrong with edgeR::calcNormFactors on this data,\n         non-finite $norm.factors, consider changing `method` argument")
+  }
+  # Estimate dispersions
+  return(estimateTagwiseDisp(estimateCommonDisp(z)))
+}
+
+
+```
+```{r Rarification curve function}
+
+#Rarefaction function from https://github.com/joey711/phyloseq/issues/143
+
+calculate_rarefaction_curves <- function(psdata, measures, depths) {
+  require('plyr') # ldply
+  require('reshape2') # melt
+
+  estimate_rarified_richness <- function(psdata, measures, depth) {
+    if(max(sample_sums(psdata)) < depth) return()
+    psdata <- prune_samples(sample_sums(psdata) >= depth, psdata)
+
+    rarified_psdata <- rarefy_even_depth(psdata, depth, verbose = FALSE)
+
+    alpha_diversity <- estimate_richness(rarified_psdata, measures = measures)
+
+    # as.matrix forces the use of melt.array, which includes the Sample names (rownames)
+    molten_alpha_diversity <- melt(as.matrix(alpha_diversity), varnames = c('Sample', 'Measure'), value.name = 'Alpha_diversity')
+
+    molten_alpha_diversity
+  }
+
+  names(depths) <- depths # this enables automatic addition of the Depth to the output by ldply
+  rarefaction_curve_data <- ldply(depths, estimate_rarified_richness, psdata = psdata, measures = measures, .id = 'Depth', .progress = ifelse(interactive(), 'text', 'none'))
+
+  # convert Depth from factor to numeric
+  rarefaction_curve_data$Depth <- as.numeric(levels(rarefaction_curve_data$Depth))[rarefaction_curve_data$Depth]
+
+  rarefaction_curve_data
+}
+
+```
+#Prokaryotes
+##Load required packages
+```{r }
+library('ggplot2')
+library(phyloseq)
+library(reshape2)
+library(plyr)
+```
+
+```{r Import data}
+
+my_16S_phyloseq = readRDS("Phyloseq_object_16S.rds")
+
+```
+##Subset to my project
+```{r}
+#Check imported data is the correct one
+my_16S_phyloseq@sam_data
+
+#Subset to biofilm project
+Biofilm_16S = subset_samples(my_16S_phyloseq, Project == "Marine_Biofilm")
+
+#Check if number of samples match expected
+nrow(Biofilm_16S@sam_data)
+
+#Import mapping file that contains metadata
+Mod_16S_map = read.csv("16S_Mapping_file.csv", row.names = 1)
+
+#Attach updated metadata to phyloseq object
+sample_data(Biofilm_16S) = Mod_16S_map
+
+#Remove weird samples - could have large number of chimeras
+Biofilm_16S =  subset_samples(Biofilm_16S, !Description == "6pmza" & !Description == "Hpezc" & !Description == "PVCza" & !Description == "6tmzb" & !Description == "PVCzc" & !Description == "6teza" & !Description == "6wszb")
+
+#Subset to my specific biofilm project
+Phyloseq_Biofilm_16S = subset_samples(Biofilm_16S, Sample_type == "Biofilm")
+
+#Keep as back up
+Phyloseq_Biofilm_16S_v0 = Phyloseq_Biofilm_16S
+```
+##Include development stage cut offs that are later identified
+```{r}
+#Add early vs late as new column to mapping file
+Mod_16S_map$StageofBiofilm = 0
+Mod_16S_map$StageofBiofilm[grep(0, Mod_16S_map$Sample_time)] = "Early"
+Mod_16S_map$StageofBiofilm[grep("7", Mod_16S_map$Sample_time)] = "Early"
+Mod_16S_map$StageofBiofilm[grep("14", Mod_16S_map$Sample_time)] = "Early"
+Mod_16S_map$StageofBiofilm[grep("19", Mod_16S_map$Sample_time)] = "Late"
+Mod_16S_map$StageofBiofilm[grep("28", Mod_16S_map$Sample_time)] = "Late"
+Mod_16S_map$StageofBiofilm[grep("42", Mod_16S_map$Sample_time)] = "Late"
+Mod_16S_map$StageofBiofilm[grep("56", Mod_16S_map$Sample_time)] = "Late"
+
+#Attach updated mapping file to phyloseq object
+sample_data(Phyloseq_Biofilm_16S) = Mod_16S_map
+```
+##Compare sequences per sample and ASV [OTU equivalent]
+```{r Compare sequences per sample or OTU}
+
+#Calculate number of reads per ASV
+readsumsdf = data.frame(nreads = sort(taxa_sums(Phyloseq_Biofilm_16S),TRUE), sorted = 1:ntaxa(Phyloseq_Biofilm_16S), type = "OTU")
+
+#Calculate and add numver of reads per sample
+readsumsdf = rbind(readsumsdf,data.frame(nreads = sort(sample_sums(Phyloseq_Biofilm_16S),TRUE),sorted = 1:nsamples(Phyloseq_Biofilm_16S), type = "Samples"))
+
+#Define title
+title = "Total number of reads"
+
+#Make initial plot
+p = ggplot(readsumsdf, aes(x = sorted, y = nreads)) +
+  geom_bar(stat = "identity")
+
+#Generate plot
+p + ggtitle(title) +
+  scale_y_log10() +
+  facet_wrap(~type, 1, scales = "free")
+
+```
+##Rarification curve generation
+```{r}
+cbbPalette <- c("#000000", #Black
+                "#E69F00", #Orange
+                "#56B4E9", #Blue (light)
+                "#009E73", #Sea green
+                "#CC79A7", #Magenta (light)
+                "#F0E442", #Yellow
+                "#0072B2", #Blue
+                "#D55E00", #Burnt orange
+                "dodgerblue4",
+                "rosybrown",
+                "floralwhite",
+                "lightgoldenrod4",
+                "cornsilk3",
+                "coral4",
+                "gray38",
+                "turquoise4",
+                "springgreen3",
+                "slateblue3",
+                "forestgreen",
+                "lightgreen")
+```
+```{r}
+#Use function to calculate curve
+rarefaction_curve_data_16S <- calculate_rarefaction_curves(Phyloseq_Biofilm_16S, c('Observed'), rep(c(1, 10, 100, 1:100 * 1000), each = 10))
+#Summarise 
+summary(rarefaction_curve_data_16S)
+
+#Reformat data and summarise for plotting
+rarefaction_curve_data_summary_16S <- ddply(rarefaction_curve_data_16S, c('Depth', 'Sample', 'Measure'), summarise, Alpha_diversity_mean = mean(Alpha_diversity), Alpha_diversity_sd = sd(Alpha_diversity))
+
+#Remove X from column and sample names to make reading easier
+colnames(rarefaction_curve_data_summary_16S) = gsub("X","", colnames(rarefaction_curve_data_summary_16S))
+rarefaction_curve_data_summary_16S$Sample = gsub("X","", rarefaction_curve_data_summary_16S$Sample)
+
+#Merge phyloseq metadata and the rarefaction summary
+rarefaction_curve_data_summary_verbose_16S <- merge(rarefaction_curve_data_summary_16S, data.frame(sample_data(Phyloseq_Biofilm_16S))
+                                                , by.x = 'Sample'
+                                                , by.y = 'row.names'
+                                                )
+rarefaction_curve_data_summary_verbose_16S$Sample_time = factor(rarefaction_curve_data_summary_verbose_16S$Sample_time,
+                                                                levels = c("0",
+                                                                           "7",
+                                                                           "14",
+                                                                           "19",
+                                                                           "28",
+                                                                           "42",
+                                                                           "56"))
+
+
+#Make plot
+Rarecurve_16S = ggplot(data = rarefaction_curve_data_summary_verbose_16S,
+  mapping = aes(x = Depth,
+                y = Alpha_diversity_mean,
+                ymin = Alpha_diversity_mean - Alpha_diversity_sd,
+                ymax = Alpha_diversity_mean + Alpha_diversity_sd,
+    colour = Sample_time,
+    group = Sample)) + 
+    geom_line(size = 0.8) + 
+    #geom_pointrange(size = 0.3) + 
+  #facet_wrap(facets = ~ Measure,  scales = 'free_y')+
+  scale_color_manual(values = cbbPalette, breaks = c("0", "7", "14", "19", "28", "42", "56"))+
+  ylab("Mean Sample Observed Richness")+
+  xlab("Tested sequencing depth")+
+  labs(colour = "Time (days)")+
+ # theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme_bw()+
+  My_Theme+
+  facet_grid(. ~ "Prokaryotes")+
+  geom_line(aes(x = 11000, colour = ""))
+
+#Display plot
+Rarecurve_16S
+
+#Save plot object for later ggarrange activity
+saveRDS(Rarecurve_16S, "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/16S_Rarecurve.rds")
+
+```
+##rarefy 10 times, combine, and then utilise the averaged result
+```{r Create average result for multiple rarefaction by transforming data using (divide by 10), results='markup'}
+#Check sample depths
+sample_sums(Phyloseq_Biofilm_16S)
+
+#Check how many samples there are in the phyloseq object
+nrow(Phyloseq_Biofilm_16S@sam_data)
+
+#Rarefy samples to an even depth of 11,000 with the use of a loop
+Biofilm_ra_all = rarefy_even_depth(Phyloseq_Biofilm_16S, sample.size = min(11000))
+for (i in 1:9){
+
+Biofilm_ra = rarefy_even_depth(Phyloseq_Biofilm_16S, sample.size = min(11000))  
+  #Object = get(paste0("Biofilm_ra"))
+    
+    Biofilm_ra_all = merge_phyloseq(Biofilm_ra_all, Biofilm_ra)
+  i = i+1  
+}
+
+#Check how many sequences remain
+sample_sums(Biofilm_ra_all) 
+#Reduce number of sequences to non-inflated amount again
+Biofilm_16S = transform_sample_counts(Biofilm_ra_all, function(x) x/10) 
+#Check how many sequences remain (should be even numbers for all samples)
+sample_sums(Biofilm_16S) 
+
+#Round and confirm count number
+Biofilm_16S = transform_sample_counts(Biofilm_16S, round)
+#Check to see if it worked
+sample_sums(Biofilm_16S)
+#Only keep samples that have more than 1 read
+Biofilm_16S = prune_samples(sample_sums(Biofilm_16S)>=1, Biofilm_16S)
+#Check to see if any samples were removed
+sample_sums(Biofilm_16S)
+#Check how many samples remain
+nrow(Biofilm_16S@sam_data)
+#Calculate sample retention percentage
+nrow(Biofilm_16S@sam_data)/nrow(Phyloseq_Biofilm_16S@sam_data)*100
+#Should be
+(147/163)*100
+```
+##Identify and prune taxa with less than 1 count and check taxa numbers again
+```{r  Save original file and create new file with only present (no zeroes) taxa, results='markup', echo=TRUE}
+
+#Calculate how many samples have taxa with 0 abundance
+sum(taxa_sums(Biofilm_16S) > 0) #How many are above 0
+any(taxa_sums(Biofilm_16S)== 0) #Any exactly 0?
+sum(taxa_sums(Biofilm_16S) == 0)  #How many are exactly 0?
+any(taxa_sums(Biofilm_16S) > 1) #Any above 1?
+sum(taxa_sums(Biofilm_16S) > 1) #How many above 1?
+any(taxa_sums(Biofilm_16S) < 1) #Any below 1?
+sum(taxa_sums(Biofilm_16S) < 1) #How many below 1?
+
+#Create new file with only present (no zeroes) taxa
+Biofilm_16S = prune_taxa(taxa_sums(Biofilm_16S) > 1, Biofilm_16S)
+any(sample_sums(Biofilm_16S) == 0) #Any exactly 0?
+any(sample_sums(Biofilm_16S) > 0) #Any above 0?
+sum(taxa_sums(Biofilm_16S) > 0) #How many above 0?
+any(sample_sums(Biofilm_16S) < 1) #Any below 1?
+sum(taxa_sums(Biofilm_16S) < 1) #How many below 1?
+```
+##Compare sequences per sample and ASV [OTU equivalent]
+```{r Compare sequences per sample or OTU}
+
+#Calculate number of reads per ASV
+readsumsdf = data.frame(nreads = sort(taxa_sums(Biofilm_16S),TRUE), sorted = 1:ntaxa(Biofilm_16S), type = "OTU")
+
+#Calculate and add numver of reads per sample
+readsumsdf = rbind(readsumsdf,data.frame(nreads = sort(sample_sums(Biofilm_16S),TRUE),sorted = 1:nsamples(Biofilm_16S), type = "Samples"))
+
+#Define title
+title = "Total number of reads"
+
+#Make initial plot
+p = ggplot(readsumsdf, aes(x = sorted, y = nreads)) +
+  geom_bar(stat = "identity")
+
+#Generate plot
+p + ggtitle(title) +
+  scale_y_log10() +
+  facet_wrap(~type, 1, scales = "free")
+
+```
+##Data refinements
+```{r What sample variables exist in the phyloseq data}
+sample_variables(Biofilm_16S)
+```
+```{r Attached OTU ID}
+tax_table(Biofilm_16S) <- cbind(tax_table(Biofilm_16S), OTU=taxa_names(Biofilm_16S))
+```
+```{r}
+#Make new column to denote prokaryotes
+Biofilm_16S@sam_data$Sequencing = "Prokaryotes"
+
+#Rename phyloseq object with updated data
+Phyloseq_Biofilm_16S = Biofilm_16S
+
+#Keep back up, just in case something goes wrong and to keep a pristine copy
+Phyloseq_Biofilm_16S_v0 = Biofilm_16S
+
+#Substrate re-nameing
+sample_data(Phyloseq_Biofilm_16S_v0)$Substrate = gsub("Acryl", "Plastic", sample_data(Phyloseq_Biofilm_16S_v0)$Substrate)
+sample_data(Phyloseq_Biofilm_16S_v0)$Substrate = gsub("Pine", "Wood", sample_data(Phyloseq_Biofilm_16S_v0)$Substrate)
+
+sample_data(Phyloseq_Biofilm_16S_v0)$Substrate <- factor(sample_data(Phyloseq_Biofilm_16S_v0)$Substrate,
+                         levels=(unique(sample_data(Phyloseq_Biofilm_16S_v0)$Substrate)))
+
+sample_data(Phyloseq_Biofilm_16S_v0)$Substrate <- factor(sample_data(Phyloseq_Biofilm_16S_v0)$Substrate,
+                         levels=c("Plastic", "Glass", "Tile", "Wood", "Water", "Mesh"))
+
+#Rename
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+```
+
+#Eukaryotes
+##Load required packages
+```{r }
+library('ggplot2')
+library(phyloseq)
+library(reshape2)
+library(plyr)
+```
+
+```{r Import data}
+
+my_18S_phyloseq = readRDS("~/Desktop/Biofilm_project/Analysis/18S/R_Analysis/Phyloseq_object_18S.rds")
+
+#Subset to only eukaryotic data
+my_18S_phyloseq = subset_taxa(my_18S_phyloseq, Kingdom == "Eukaryota")
+
+```
+##Subset to my project
+```{r}
+#Check imported data is the correct one
+my_18S_phyloseq@sam_data
+
+#Subset to biofilm project
+Biofilm_18S = subset_samples(my_18S_phyloseq, Project == "Marine_Biofilm")
+
+#Check if number of samples match expected
+nrow(Biofilm_18S@sam_data)
+
+#Import mapping file that contains metadata
+Mod_18S_map = read.csv("~/Desktop/Biofilm_project/Analysis/18S/R_Analysis/18S_Mapping_file.csv", row.names = 1)
+
+#Attach updated metadata to phyloseq object
+sample_data(Biofilm_18S) = Mod_18S_map
+
+#Subset to my specific biofilm project
+Phyloseq_Biofilm_18S = subset_samples(Biofilm_18S, Sample_type == "Biofilm")
+
+#Keep as back up
+Phyloseq_Biofilm_18S_v0 = Phyloseq_Biofilm_18S
+```
+##Include development stage cut offs that are later identified
+```{r}
+#Add early vs late as new column to mapping file
+Mod_18S_map$StageofBiofilm = 0
+Mod_18S_map$StageofBiofilm[grep(0, Mod_18S_map$Sample_time)] = "Early"
+Mod_18S_map$StageofBiofilm[grep("7", Mod_18S_map$Sample_time)] = "Early"
+Mod_18S_map$StageofBiofilm[grep("14", Mod_18S_map$Sample_time)] = "Late"
+Mod_18S_map$StageofBiofilm[grep("19", Mod_18S_map$Sample_time)] = "Late"
+Mod_18S_map$StageofBiofilm[grep("28", Mod_18S_map$Sample_time)] = "Late"
+Mod_18S_map$StageofBiofilm[grep("42", Mod_18S_map$Sample_time)] = "Late"
+Mod_18S_map$StageofBiofilm[grep("56", Mod_18S_map$Sample_time)] = "Late"
+
+#Attach updated mapping file to phyloseq object
+sample_data(Phyloseq_Biofilm_18S) = Mod_18S_map
+```
+##Compare sequences per sample and ASV [OTU equivalent]
+```{r Compare sequences per sample or OTU}
+
+#Calculate number of reads per ASV
+readsumsdf = data.frame(nreads = sort(taxa_sums(Phyloseq_Biofilm_18S),TRUE), sorted = 1:ntaxa(Phyloseq_Biofilm_18S), type = "OTU")
+
+#Calculate and add numver of reads per sample
+readsumsdf = rbind(readsumsdf,data.frame(nreads = sort(sample_sums(Phyloseq_Biofilm_18S),TRUE),sorted = 1:nsamples(Phyloseq_Biofilm_18S), type = "Samples"))
+
+#Define title
+title = "Total number of reads"
+
+#Make initial plot
+p = ggplot(readsumsdf, aes(x = sorted, y = nreads)) +
+  geom_bar(stat = "identity")
+
+#Generate plot
+p + ggtitle(title) +
+  scale_y_log10() +
+  facet_wrap(~type, 1, scales = "free")
+
+```
+##Rarification curve generation
+```{r}
+#Use function to calculate curve
+rarefaction_curve_data_18S <- calculate_rarefaction_curves(Phyloseq_Biofilm_18S, c('Observed'), rep(c(1, 10, 100, 1:100 * 1000), each = 10))
+#Summarise 
+summary(rarefaction_curve_data_18S)
+
+#Reformat data and summarise for plotting
+rarefaction_curve_data_summary_18S <- ddply(rarefaction_curve_data_18S, c('Depth', 'Sample', 'Measure'), summarise, Alpha_diversity_mean = mean(Alpha_diversity), Alpha_diversity_sd = sd(Alpha_diversity))
+
+#Remove X from column and sample names to make reading easier
+colnames(rarefaction_curve_data_summary_18S) = gsub("X","", colnames(rarefaction_curve_data_summary_18S))
+rarefaction_curve_data_summary_18S$Sample = gsub("X","", rarefaction_curve_data_summary_18S$Sample)
+
+#Merge phyloseq metadata and the rarefaction summary
+rarefaction_curve_data_summary_verbose_18S <- merge(rarefaction_curve_data_summary_18S, data.frame(sample_data(Phyloseq_Biofilm_18S))
+                                                , by.x = 'Sample'
+                                                , by.y = 'row.names'
+                                                )
+
+#Make plot
+Rarecurve_18S = ggplot(data = rarefaction_curve_data_summary_verbose_18S,
+  mapping = aes(x = Depth,
+                y = Alpha_diversity_mean,
+                ymin = Alpha_diversity_mean - Alpha_diversity_sd,
+                ymax = Alpha_diversity_mean + Alpha_diversity_sd,
+    colour = as.factor(Sample_time),
+    group = Sample)) + 
+    geom_line(size = 0.8) + 
+    #geom_pointrange(size = 0.3) + 
+  #facet_wrap(facets = ~ Measure,  scales = 'free_y')+
+  scale_color_manual(values = cbbPalette, breaks = c("0", "7", "14", "19", "28", "42", "56"))+
+  ylab("Mean Sample Observed Richness")+
+  xlab("Tested sequencing depth")+
+  labs(colour = "Time (days)")+
+ # theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  theme_bw()+
+  My_Theme+
+  facet_grid(. ~ "Eukaryotes")+
+  geom_line(aes(x = 11000, colour = ""))
+
+#Display plot
+Rarecurve_18S
+
+#Save plot object for later ggarrange activity
+saveRDS(Rarecurve_18S, "~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/18S_Rarecurve.rds")
+
+```
+##rarefy 10 times, combine, and then utilise the averaged result
+```{r Create average result for multiple rarefaction by transforming data using (divide by 10), results='markup'}
+#Check sample depths
+sample_sums(Phyloseq_Biofilm_18S)
+
+#Check how many samples there are in the phyloseq object
+nrow(Phyloseq_Biofilm_18S@sam_data)
+
+#Rarefy samples to an even depth of 11,000 with the use of a loop
+Biofilm_ra_all = rarefy_even_depth(Phyloseq_Biofilm_18S, sample.size = min(11000))
+for (i in 1:9){
+
+Biofilm_ra = rarefy_even_depth(Phyloseq_Biofilm_18S, sample.size = min(11000))  
+  #Object = get(paste0("Biofilm_ra"))
+    
+    Biofilm_ra_all = merge_phyloseq(Biofilm_ra_all, Biofilm_ra)
+  i = i+1  
+}
+
+#Check how many sequences remain
+sample_sums(Biofilm_ra_all) 
+#Reduce number of sequences to non-inflated amount again
+Biofilm_18S = transform_sample_counts(Biofilm_ra_all, function(x) x/10) 
+#Check how many sequences remain (should be even numbers for all samples)
+sample_sums(Biofilm_18S) 
+
+#Round and confirm count number
+Biofilm_18S = transform_sample_counts(Biofilm_18S, round)
+#Check to see if it worked
+sample_sums(Biofilm_18S)
+#Only keep samples that have more than 1 read
+Biofilm_18S = prune_samples(sample_sums(Biofilm_18S)>=1, Biofilm_18S)
+#Check to see if any samples were removed
+sample_sums(Biofilm_18S)
+#Check how many samples remain
+nrow(Biofilm_18S@sam_data)
+#Calculate sample retention percentage
+(nrow(Biofilm_18S@sam_data)/nrow(Phyloseq_Biofilm_18S@sam_data))*100
+#Should be
+(154/167)*100
+```
+##Identify and prune taxa with less than 1 count and check taxa numbers again
+```{r  Save original file and create new file with only present (no zeroes) taxa, results='markup', echo=TRUE}
+
+#Calculate how many samples have taxa with 0 abundance
+sum(taxa_sums(Biofilm_18S) > 0) #How many are above 0
+any(taxa_sums(Biofilm_18S)== 0) #Any exactly 0?
+sum(taxa_sums(Biofilm_18S) == 0)  #How many are exactly 0?
+any(taxa_sums(Biofilm_18S) > 1) #Any above 1?
+sum(taxa_sums(Biofilm_18S) > 1) #How many above 1?
+any(taxa_sums(Biofilm_18S) < 1) #Any below 1?
+sum(taxa_sums(Biofilm_18S) < 1) #How many below 1?
+
+#Create new file with only present (no zeroes) taxa
+Biofilm_18S = prune_taxa(taxa_sums(Biofilm_18S) > 1, Biofilm_18S)
+any(sample_sums(Biofilm_18S) == 0) #Any exactly 0?
+any(sample_sums(Biofilm_18S) > 0) #Any above 0?
+sum(taxa_sums(Biofilm_18S) > 0) #How many above 0?
+any(sample_sums(Biofilm_18S) < 1) #Any below 1?
+sum(taxa_sums(Biofilm_18S) < 1) #How many below 1?
+```
+##Compare sequences per sample and ASV [OTU equivalent]
+```{r Compare sequences per sample or OTU}
+
+#Calculate number of reads per ASV
+readsumsdf = data.frame(nreads = sort(taxa_sums(Biofilm_18S),TRUE), sorted = 1:ntaxa(Biofilm_18S), type = "OTU")
+
+#Calculate and add numver of reads per sample
+readsumsdf = rbind(readsumsdf,data.frame(nreads = sort(sample_sums(Biofilm_18S),TRUE),sorted = 1:nsamples(Biofilm_18S), type = "Samples"))
+
+#Define title
+title = "Total number of reads"
+
+#Make initial plot
+p = ggplot(readsumsdf, aes(x = sorted, y = nreads)) +
+  geom_bar(stat = "identity")
+
+#Generate plot
+p + ggtitle(title) +
+  scale_y_log10() +
+  facet_wrap(~type, 1, scales = "free")
+
+```
+##Data refinements
+```{r What sample variables exist in the phyloseq data}
+sample_variables(Biofilm_18S)
+```
+```{r Attached OTU ID}
+tax_table(Biofilm_18S) <- cbind(tax_table(Biofilm_18S), OTU=taxa_names(Biofilm_18S))
+```
+```{r}
+#Make new column to denote prokaryotes
+Biofilm_18S@sam_data$Sequencing = "Eukaryotes"
+
+#Rename phyloseq object with updated data
+Phyloseq_Biofilm_18S = Biofilm_18S
+
+#Keep back up, just in case something goes wrong and to keep a pristine copy
+Phyloseq_Biofilm_18S_v0 = Biofilm_18S
+
+#Substrate re-nameing
+sample_data(Phyloseq_Biofilm_18S_v0)$Substrate = gsub("Acryl", "Plastic", sample_data(Phyloseq_Biofilm_18S_v0)$Substrate)
+sample_data(Phyloseq_Biofilm_18S_v0)$Substrate = gsub("Pine", "Wood", sample_data(Phyloseq_Biofilm_18S_v0)$Substrate)
+
+sample_data(Phyloseq_Biofilm_18S_v0)$Substrate <- factor(sample_data(Phyloseq_Biofilm_18S_v0)$Substrate,
+                         levels=(unique(sample_data(Phyloseq_Biofilm_18S_v0)$Substrate)))
+
+sample_data(Phyloseq_Biofilm_18S_v0)$Substrate <- factor(sample_data(Phyloseq_Biofilm_18S_v0)$Substrate,
+                         levels=c("Plastic", "Glass", "Tile", "Wood", "Water", "Mesh"))
+
+#Rename
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+
+#Subset to only substrate associated biofilms
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+```
+
+
+
+
+
+
+
+

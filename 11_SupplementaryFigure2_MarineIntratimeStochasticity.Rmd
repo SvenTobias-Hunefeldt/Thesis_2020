@@ -1,0 +1,349 @@
+---
+title: "Marine water stochasticity"
+author: "Sven Tobias-Hunefeldt"
+date: "26/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script
+```{r Load packages}
+
+library(phyloseq)
+library(ggplot2)
+library(ggpubr)
+library(vegan)
+library(reshape2)
+library(dplyr)
+
+```
+#Intra time water dissimilarity
+```{r Extract and run prokayotic comparisons}
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_16S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_16S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_16S.csv")
+
+```
+```{r Reformat prokaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T | grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_16S_v0 = Temporary_df
+Temporary_df_16S = Temporary_df_16S_v0
+```
+```{r Extract and run rukayotic comparisons}
+#Extract otu table
+OTU1 = as(otu_table(Phyloseq_Biofilm_18S), "matrix")
+
+#Make sure rows are samples and columns are the different taxa (ASVs in this case)
+if(taxa_are_rows(Phyloseq_Biofilm_18S)){OTU1 <- t(OTU1)}
+
+#Convert to a dataframe for later manipulation
+OTUdf = as.data.frame(OTU1)
+
+#Run bray dissimilarity matrix - we want quantitative hence we turn off binary
+Braydf = vegdist(OTUdf, method = "bray", binary = FALSE)
+
+#write.csv(as.matrix(Braydf), "Bray_Diss_18S.csv")
+
+```
+```{r Reformat eukaryotic for downstream analysis}
+
+#Make into readable form (wide)
+Braydf_wide = as.data.frame(as.matrix(Braydf))
+Braydf_wide$Sample_ID = rownames(as.data.frame(as.matrix(Braydf))) #Make rownames another column
+colnames(Braydf_wide) #Check to make sure rename worked
+Braydf_long = reshape2::melt(Braydf_wide, id.vars = "Sample_ID") #Make df into long format
+
+#Rename y axis so more meaningful
+colnames(Braydf_long)[3] <- "Bray_dissimilarity"
+colnames(Braydf_long)[2] <- "Var2" 
+colnames(Braydf_long)[1] <- "Var1" 
+
+
+#Remove self-comparisons
+Braydf_long = Braydf_long %>%
+    dplyr::filter(as.character(Var1) != as.character(Var2)) %>%
+    dplyr::mutate_if(is.factor,
+              as.character)
+Temporary_df = Braydf_long 
+
+#remove replicate information
+Temporary_df$Var1 = gsub("za","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zb","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zc","", Temporary_df$Var1)
+Temporary_df$Var1 = gsub("zd","", Temporary_df$Var1)
+
+#Determine source of sample
+Temporary_df$Substrate = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("p", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Wood"
+} else if (grepl("a", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Plastic"
+} else if (grepl("g", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Glass"
+} else if (grepl("t", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Tile"
+} else if (grepl("me", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Mesh"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Substrate[i] = "Water"
+}
+  i=i+1
+}
+
+#Determine when sample was collected
+Temporary_df$Sample_time = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("0", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "0"
+} else if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "7"
+} else if (grepl("2", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "14"
+} else if (grepl("3", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "19"
+} else if (grepl("4", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "28"
+} else if (grepl("5", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "42"
+} else if (grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$Sample_time[i] = "56"
+}
+  i=i+1
+}
+
+#Determine enclosure status of sample
+Temporary_df$Mesh_status = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("e", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Non-enclosed"
+} else if (grepl("m", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Enclosed"
+} else if (grepl("ws", Temporary_df$Var1[i]) == T){
+  Temporary_df$Mesh_status[i] = "Water"
+}
+  i=i+1
+}
+
+Temporary_df$StageofBiofilm = NA
+for (i in 1:nrow(Temporary_df)) {
+if (grepl("1", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Early"
+} else if (grepl("2", Temporary_df$Var1[i]) == T | grepl("3", Temporary_df$Var1[i]) == T | grepl("4", Temporary_df$Var1[i]) == T | grepl("5", Temporary_df$Var1[i]) == T | grepl("6", Temporary_df$Var1[i]) == T){
+  Temporary_df$StageofBiofilm[i] = "Late"
+} 
+  i=i+1
+}
+
+Temporary_df_18S_v0 = Temporary_df
+Temporary_df_18S = Temporary_df_18S_v0
+```
+```{r Combine prokaryotic and eukaryotic comparisons}
+Temporary_df_16S_v0$Sequencing = as.factor("Prokaryotes")
+Temporary_df_18S_v0$Sequencing = as.factor("Eukaryotes")
+
+Temporary_df = rbind(Temporary_df_16S_v0, Temporary_df_18S_v0)
+Temporary_df_v0 = Temporary_df
+
+
+```
+```{r Subset and plot water day to day}
+#Extract only water samples
+Temporary_df_2 = data.frame()
+y = 1
+for (i in 1:nrow(Temporary_df_v0)) {
+if (grepl("ws", Temporary_df_v0$Var1[i]) == T && grepl("ws", Temporary_df_v0$Var2[i]) == T){
+  Temporary_df_2 = rbind(Temporary_df_2, Temporary_df_v0[i,])
+  y = y+1
+  }
+  i=i+1
+}
+
+#Subset to only compare intra time pointly
+Day_to_day_df = data.frame()
+y = 1
+for (i in 1:nrow(Temporary_df_2)) {
+if (grepl("0", Temporary_df_2$Var1[i]) == T && grepl("0", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+}
+  else if (grepl("1", Temporary_df_2$Var1[i]) == T && grepl("1", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("2", Temporary_df_2$Var1[i]) == T && grepl("2", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("3", Temporary_df_2$Var1[i]) == T && grepl("3", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("4", Temporary_df_2$Var1[i]) == T && grepl("4", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("5", Temporary_df_2$Var1[i]) == T && grepl("5", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+} else if (grepl("6", Temporary_df_2$Var1[i]) == T && grepl("6", Temporary_df_2$Var2[i]) == T){
+  Day_to_day_df = rbind(Day_to_day_df, Temporary_df_2[i,])
+  y = y+1
+}
+  i=i+1
+}
+
+#Make sure it worked
+Day_to_day_df
+unique(Day_to_day_df$Substrate)
+
+#Rename NA stage of water to settler
+Day_to_day_df$StageofBiofilm[is.na(Day_to_day_df$StageofBiofilm)] <- "Settler"
+#Reorder levels for pplotting and convert time to factor
+Day_to_day_df$Sample_time = factor(Day_to_day_df$Sample_time, 
+                                      levels = c(0,7,14,19,28,42,56))
+Day_to_day_df$Sequencing = factor(Day_to_day_df$Sequencing,
+                                   levels = c("Prokaryotes", "Eukaryotes"))
+
+#Summarise for plot
+Summary_D2D = summarySE(Day_to_day_df, measurevar = "Bray_dissimilarity", groupvars = c("Sample_time", "Sequencing", "StageofBiofilm"))
+
+#Make plot
+Plot_bray_D2D = ggplot(Summary_D2D, aes(x = Sample_time, y = Bray_dissimilarity, colour = Sequencing, group = Sequencing))+
+  geom_line(lwd = 1)+
+  scale_color_manual("Organism", values = Organism_list)+
+  ylab("Bray-Curtis dissimilarity")+
+  xlab("Time (days)")+
+  theme_bw()+
+  My_Theme
+
+#Plot
+Plot_bray_D2D
+
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/SupplementaryFigure2_Intratime_Water.pdf", width = 16, height = 6.66)
+Plot_bray_D2D
+dev.off()
+```
+```{r Calculate water day to day means}
+test_mean = Day_to_day_df %>% 
+  group_by(Sequencing) %>% 
+  dplyr::summarise(mean_val = mean(Bray_dissimilarity ), sd = sd(Bray_dissimilarity ))
+print(test_mean)
+
+```
+```{r Water day to day statistics}
+Prok_D2D_Water = subset(Day_to_day_df, Sequencing == "Prokaryotes")
+Euk_D2D_Water = subset(Day_to_day_df, Sequencing == "Eukaryotes")
+
+kruskal.test(Day_to_day_df$Bray_dissimilarity, Day_to_day_df$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Prok_D2D_Water$Bray_dissimilarity, Prok_D2D_Water$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Euk_D2D_Water$Bray_dissimilarity, Euk_D2D_Water$Sample_time, p.adjust.method = "bonferroni")
+#No significant time difference
+
+wilcox.test(Day_to_day_df$Bray_dissimilarity ~ Day_to_day_df$Sequencing, p.adjust.method = "bonferroni")
+#Significant sequencing difference
+
+pairwise.wilcox.test(Day_to_day_df$Bray_dissimilarity, Day_to_day_df$StageofBiofilm, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Prok_D2D_Water$Bray_dissimilarity, Prok_D2D_Water$StageofBiofilm, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Euk_D2D_Water$Bray_dissimilarity, Euk_D2D_Water$StageofBiofilm, p.adjust.method = "bonferroni")
+#No significant stage effect
+```

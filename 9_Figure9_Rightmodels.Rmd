@@ -1,0 +1,121 @@
+---
+title: "Figure 7 models"
+author: "Sven Tobias-Hunefeldt"
+date: "24/03/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+require(ggplot2)
+```
+
+#Import data
+```{r}
+Models_df = read.csv("~/Desktop/Biofilm_project/Extra/Figure_9_models_ab.csv")
+Arth_Cilio_df = read.csv("~/Desktop/Biofilm_project/Extra/ForFig9_ArthCilio.csv", row.names = 1)
+```
+
+#Generate plots
+
+```{r}
+####General models####
+#Reorder facet levels
+Models_df$Scenario = factor(Models_df$Scenario, levels=c('Null','Single','Build','Override'))
+
+#Set up position dodge
+pd = position_dodge(0.15)
+
+#Plot
+Models_p = ggplot(Models_df, aes(x = Time, y = Value, colour = ASV, group = ASV, fill = ASV)) +
+  geom_line()+
+  #geom_errorbar(aes(ymin=(Value-Standard_Deviation), 
+   #                 ymax=(Value+Standard_Deviation), 
+    #                colour = ASV),
+     #           position=pd)+
+  geom_ribbon(aes(ymin=Value-Standard_Deviation, ymax=Value+Standard_Deviation), linetype = 2, alpha = 0.1)+
+  facet_grid(Scenario ~ ., switch = "both") +
+  scale_color_manual(values = c("black", "red"))+
+  scale_fill_manual(values=c("navy", "red"), name="fill")+
+  theme_bw()+
+  My_Theme+
+  ylab("Relative abundnace")+
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        legend.title = element_blank(),
+        legend.justification = "top",
+        legend.text = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))+
+  guides(fill = F,
+         colour = guide_legend(order = 1))
+  
+  
+
+Models_p 
+
+####Actual Data####
+
+Arth_Cilio_df
+
+#Plot
+Data_p = ggplot(Arth_Cilio_df, 
+                  aes(x = Sample_time, 
+                      y = Abundance, 
+                      colour = Phylum, 
+                      group = Phylum, 
+                      fill = Phylum)) +
+  geom_line()+
+  #geom_errorbar(aes(ymin=(Abundance-Standard_Deviation), 
+   #                 ymax=(Abundance+Standard_Deviation), 
+    #                colour = ASV),
+     #           position=pd)+
+  geom_ribbon(aes(ymin=Abundance-sd, 
+                  ymax=Abundance+sd),
+              linetype = 2, 
+              alpha = 0.1)+
+  scale_color_manual(values = c("black", "red"))+
+  scale_fill_manual(values=c("navy", "red"), 
+                    name="fill")+
+  xlab("Time")+
+  theme_bw()+
+  My_Theme+
+  ylab("Relative abundnace")+
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        legend.title = element_blank(),
+        legend.justification = "top",
+        legend.text = element_text(size = 10),
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10))+
+  guides(fill = F,
+         colour = guide_legend(order = 1))
+
+Data_p
+
+####Extract as figure ####
+
+Test = ggarrange(ggarrange(NA, Models_p,
+                           ncol = 2
+                           ),
+                 Data_p,
+                 heights = c(3,1),
+                 nrow = 2
+                 )
+
+
+Test
+
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/Figure_9_models.pdf", height = 9, width = 10)
+Test
+dev.off()
+
+```

@@ -1,0 +1,897 @@
+---
+title: "Figure 3 - Alpha diversity"
+author: "Sven Tobias-Hunefeldt"
+date: "03/04/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Set up
+Import data and refine as done using the set up script.
+
+```{r load packages}
+
+library(microbiome)
+library(Rmisc)
+library(ggplot2)
+library(ggpubr)
+library(vegan)
+library(RVAideMemoire)
+library(tidyverse)
+library(tibble)
+
+```
+```{r Refine colours and shapes}
+#Refine colours
+cbbPalette <- c("black",
+                "red",
+                "navy", 
+                "green", 
+                "magenta",
+                "forestgreen",
+                "turquoise")
+
+Time_colour_list = c("0" = "turquoise", 
+                     "7" = "forestgreen", 
+                     "14" = "black", 
+                     "19" = "red", 
+                     "28" = "navy", 
+                     "42" = "green", 
+                     "56" = "magenta")
+
+#Refine shape list
+Substrate_shape_list = c("Plastic" = 15, #Filled square 
+                         "Glass" = 16, #Filled circle
+                         "Tile" = 17, #Filled Triangle
+                         "Wood" = 5, #Hollow diamond
+                         "Water" = 11) #Lined star
+
+#Make colour lists
+Substrate_colour_list = c("Plastic" = "black",
+                  "Glass" = "green",
+                  "Tile" = "blue",
+                  "Wood" = "magenta")
+
+Sequencing_colours = c("Prokaryotes" = "black",
+                       "Eukaryotes" = "red")
+
+Mesh_Palette = c("Enclosed" = "#000000",
+                 "Non-enclosed" = "#E69F00")
+
+```
+#Figure 3 A
+```{r Calculate prokaryotic alpha diversity measure}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+#Calculate richness
+alpha_summary_16S <- estimate_richness(Phyloseq_Biofilm_16S, measures = c("Observed", "Shannon"))
+#Make rownmes match with sample data
+row.names(alpha_summary_16S) =gsub("X", "", row.names(alpha_summary_16S))
+#Calculate evenness
+Evenness_16S <- evenness(Phyloseq_Biofilm_16S, 'pielou')
+#Append evenness to other diversity metrics
+alpha_summary_16S$Pielou <- Evenness_16S$pielou
+
+#Combine diveristy metrics with metadata
+Map_16S_alpha <- data.frame(alpha_summary_16S, sample_data(Phyloseq_Biofilm_16S))
+#Save diveristy metrics into phyloseq objects metadata
+sample_data(Phyloseq_Biofilm_16S) = Map_16S_alpha
+#Make sure it's worked
+Phyloseq_Biofilm_16S@sam_data
+
+#Subset diversity data to only biofilm data
+Map_16S_alpha_noA = subset(Map_16S_alpha, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+#Ensure prokaryotic data is noted
+Map_16S_alpha_noA$Sequencing = "Prokaryotes"
+
+#Subset into biofilm phyloseq object with diversity metrics
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+```
+```{r Make prokaryotic richness plot}
+
+#Sumamrise for plotting
+alpha_summary_16S_Obs = summarySE(Map_16S_alpha_noA, measurevar="Observed", groupvars=c("Mesh_status", "Substrate", "Sample_time", "Sequencing"))
+
+#Exposed -> Non-enclosed
+alpha_summary_16S_Obs$Mesh_status = gsub("Exposed", "Non-enclosed", alpha_summary_16S_Obs$Mesh_status)
+
+#Convert and reorder for plotting
+alpha_summary_16S_Obs$Sample_time = as.factor(as.character(alpha_summary_16S_Obs$Sample_time))
+alpha_summary_16S_Obs$Sample_time = factor(alpha_summary_16S_Obs$Sample_time,
+                         levels=c("7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+alpha_summary_16S_Obs$Substrate = factor(alpha_summary_16S_Obs$Substrate,
+                         levels=unique(alpha_summary_16S_Obs$Substrate))
+#Make plot
+Observed_16S = ggplot(alpha_summary_16S_Obs, aes(x = Sample_time, y = Observed, colour = Substrate, group = Substrate))+
+  geom_line(lwd = 1)+
+  geom_errorbar(aes(ymin=(Observed-se), 
+                    ymax=(Observed+se),
+                    colour = Substrate), 
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  ylab("Observed Richness")+
+  xlab("Time (days)")+
+  #ylim(0,1300)+
+  scale_color_manual("Substrate", values = Substrate_colour_list)+
+ # scale_y_continuous(limits = c(0,1500), breaks = c(0,1000))+
+  theme_bw()+
+  My_Theme+
+  ggtitle("Prokaryotes")+
+  theme(plot.title = element_text(hjust = 0.5))
+  
+#Inspect plot
+Observed_16S
+
+```
+```{r Calculate means and sd}
+#Mean substrate
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(Substrate) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+#Substarte differences
+test_mean$mean_val[3] - ((test_mean$mean_val[1] +test_mean$mean_val[2] + test_mean$mean_val[4])/3)
+
+#Mean across development and enclsoure condition
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(StageofBiofilm, Mesh_status) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+#Calculate difference
+test_mean$mean_val[2]-test_mean$mean_val[1]
+test_mean$mean_val[4]-test_mean$mean_val[3]
+
+#Mean substarte and enclsoure condition
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(Substrate, Mesh_status) %>% 
+  dplyr::summarise(sum_val = sum(Pielou), mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#Mean across developmental phases
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(StageofBiofilm) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+
+#SD decrease over developmental phases
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[2]/test_mean$mean_val[2])
+
+#Mean over time
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+
+#SD decrease over time
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[6]/test_mean$mean_val[6])
+```
+
+#Figure 3 B
+```{r Calculate Eukaryotic alpha diversity measure}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+#Calculate richness
+alpha_summary_18S <- estimate_richness(Phyloseq_Biofilm_18S, measures = c("Observed", "Shannon"))
+#Make rownmes match with sample data
+row.names(alpha_summary_18S) =gsub("X", "", row.names(alpha_summary_18S))
+#Calculate evenness
+Evenness_18S <- evenness(Phyloseq_Biofilm_18S, 'pielou')
+#Append evenness to other diversity metrics
+alpha_summary_18S$Pielou <- Evenness_18S$pielou
+
+#Combine diveristy metrics with metadata
+Map_18S_alpha <- data.frame(alpha_summary_18S, sample_data(Phyloseq_Biofilm_18S))
+#Save diveristy metrics into phyloseq objects metadata
+sample_data(Phyloseq_Biofilm_18S) = Map_18S_alpha
+#Make sure it's worked
+Phyloseq_Biofilm_18S@sam_data
+
+#Subset diversity data to only biofilm data
+Map_18S_alpha_noA = subset(Map_18S_alpha, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+#Ensure Eukaryotic data is noted
+Map_18S_alpha_noA$Sequencing = "Eukaryotes"
+
+#Subset into biofilm phyloseq object with diversity metrics
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+```
+```{r Make eukaryotic richness plot}
+
+#Summarise for plotting
+alpha_summary_18S_Obs = summarySE(Map_18S_alpha_noA, measurevar="Observed", groupvars=c("Mesh_status", "Substrate", "Sample_time", "Sequencing"))
+
+#Exposed -> Non-enclosed
+alpha_summary_18S_Obs$Mesh_status = gsub("Exposed", "Non-enclosed", alpha_summary_18S_Obs$Mesh_status)
+
+#Convert and reorder for plotting
+alpha_summary_18S_Obs$Sample_time = as.factor(as.character(alpha_summary_18S_Obs$Sample_time))
+alpha_summary_18S_Obs$Sample_time = factor(alpha_summary_18S_Obs$Sample_time,
+                         levels=c("7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+#Make plot
+Observed_18S = ggplot(alpha_summary_18S_Obs, aes(x = Sample_time, y = Observed, colour = Substrate, group = Substrate))+
+  geom_line(lwd=1)+
+  geom_errorbar(aes(ymin=(Observed-se), 
+                    ymax=(Observed+se),
+                    colour = Substrate), 
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  ylab("Observed Richness")+
+  xlab("Time (days)")+
+  #ylim(0,1300)+
+  scale_color_manual("Substrate", values = Substrate_colour_list)+
+  #scale_y_continuous(limits = c(0,600), breaks = c(0, 400))+
+  theme_bw()+
+  My_Theme+
+  ggtitle("Eukaryotes")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Inspect plot
+Observed_18S
+
+```
+```{r Calculate means and sd}
+#Mean substrate
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(Substrate) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+#Substarte differences
+test_mean$mean_val[3] - ((test_mean$mean_val[1] +test_mean$mean_val[2] + test_mean$mean_val[4])/3)
+
+#Mean across development and enclsoure condition
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(StageofBiofilm, Mesh_status) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+#Calculate difference
+test_mean$mean_val[2]-test_mean$mean_val[1]
+test_mean$mean_val[4]-test_mean$mean_val[3]
+
+#Mean substarte and enclsoure condition
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(Substrate, Mesh_status) %>% 
+  dplyr::summarise(sum_val = sum(Pielou), mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#Mean across developmental phases
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(StageofBiofilm) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+
+#SD decrease over developmental phases
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[2]/test_mean$mean_val[2])
+
+#Mean over time
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Observed), sd = sd(Observed))
+print(test_mean)
+
+#SD decrease over time
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[6]/test_mean$mean_val[6])
+```
+#Figure 3 C
+```{r Calculate prokaryotic alpha diversity measure}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_16S = Phyloseq_Biofilm_16S_v0
+#Calculate richness
+alpha_summary_16S <- estimate_richness(Phyloseq_Biofilm_16S, measures = c("Observed", "Shannon"))
+#Make rownmes match with sample data
+row.names(alpha_summary_16S) =gsub("X", "", row.names(alpha_summary_16S))
+#Calculate evenness
+Evenness_16S <- evenness(Phyloseq_Biofilm_16S, 'pielou')
+#Append evenness to other diversity metrics
+alpha_summary_16S$Pielou <- Evenness_16S$pielou
+
+#Combine diveristy metrics with metadata
+Map_16S_alpha <- data.frame(alpha_summary_16S, sample_data(Phyloseq_Biofilm_16S))
+#Save diveristy metrics into phyloseq objects metadata
+sample_data(Phyloseq_Biofilm_16S) = Map_16S_alpha
+#Make sure it's worked
+Phyloseq_Biofilm_16S@sam_data
+
+#Subset diversity data to only biofilm data
+Map_16S_alpha_noA = subset(Map_16S_alpha, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+#Ensure prokaryotic data is noted
+Map_16S_alpha_noA$Sequencing = "Prokaryotes"
+
+#Subset into biofilm phyloseq object with diversity metrics
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+```
+```{r Make prokaryotic evenness plot}
+
+#Sumamrise for plotting
+alpha_summary_16S_Pie = summarySE(Map_16S_alpha_noA, measurevar="Pielou", groupvars=c("Mesh_status", "Substrate", "Sample_time", "Sequencing"))
+
+#Exposed -> Non-enclosed
+alpha_summary_16S_Pie$Mesh_status = gsub("Exposed", "Non-enclosed", alpha_summary_16S_Pie$Mesh_status)
+
+#Convert and reorder for plotting
+alpha_summary_16S_Pie$Sample_time = as.factor(as.character(alpha_summary_16S_Pie$Sample_time))
+alpha_summary_16S_Pie$Sample_time = factor(alpha_summary_16S_Pie$Sample_time,
+                         levels=c("7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+#Make plot
+Pielou_16S = ggplot(alpha_summary_16S_Pie, aes(x = Sample_time, y = Pielou, colour = Substrate, group = Substrate))+
+  geom_line(lwd=1)+
+  geom_errorbar(aes(ymin=(Pielou-se), 
+                    ymax=(Pielou+se),
+                    colour = Substrate), 
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  ylab("Pielou evenness")+
+  xlab("Time (days)")+
+  #ylim(0,1300)+
+  scale_color_manual("Substrate", values = Substrate_colour_list)+
+  #scale_y_continuous(limits = c(0.5,1), breaks = c(0.6, 0.8, 1))+
+  theme_bw()+
+  My_Theme+
+  ggtitle("Prokaryotes")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Inspect plot
+Pielou_16S
+
+```
+```{r Calculate means and sd}
+#Mean substrate
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(Substrate) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#Mean across development and enclsoure condition
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(StageofBiofilm, Mesh_status) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+#Calculate difference
+test_mean$mean_val[2]-test_mean$mean_val[1]
+test_mean$mean_val[4]-test_mean$mean_val[3]
+
+#Mean substarte and enclsoure condition
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(Substrate, Mesh_status) %>% 
+  dplyr::summarise(sum_val = sum(Pielou), mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#Mean across developmental phases
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(StageofBiofilm) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#SD decrease over developmental phases
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[2]/test_mean$mean_val[2])
+
+#Mean over time
+test_mean = Map_16S_alpha_noA %>% 
+  group_by(Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#SD decrease over time
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[6]/test_mean$mean_val[6])
+```
+#Figure 3 D
+```{r Calculate Eukaryotic alpha diversity measure}
+#Get pristine phyloseq object from back up
+Phyloseq_Biofilm_18S = Phyloseq_Biofilm_18S_v0
+#Calculate richness
+alpha_summary_18S <- estimate_richness(Phyloseq_Biofilm_18S, measures = c("Observed", "Shannon"))
+#Make rownmes match with sample data
+row.names(alpha_summary_18S) =gsub("X", "", row.names(alpha_summary_18S))
+#Calculate evenness
+Evenness_18S <- evenness(Phyloseq_Biofilm_18S, 'pielou')
+#Append evenness to other diversity metrics
+alpha_summary_18S$Pielou <- Evenness_18S$pielou
+
+#Combine diveristy metrics with metadata
+Map_18S_alpha <- data.frame(alpha_summary_18S, sample_data(Phyloseq_Biofilm_18S))
+#Save diveristy metrics into phyloseq objects metadata
+sample_data(Phyloseq_Biofilm_18S) = Map_18S_alpha
+#Make sure it's worked
+Phyloseq_Biofilm_18S@sam_data
+
+#Subset diversity data to only biofilm data
+Map_18S_alpha_noA = subset(Map_18S_alpha, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+#Ensure Eukaryotic data is noted
+Map_18S_alpha_noA$Sequencing = "Eukaryotes"
+
+#Subset into biofilm phyloseq object with diversity metrics
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+```
+```{r Make Eukaryotic evenness plot}
+
+#Sumamrise for plotting
+alpha_summary_18S_Pie = summarySE(Map_18S_alpha_noA, measurevar="Pielou", groupvars=c("Mesh_status", "Substrate", "Sample_time", "Sequencing"))
+
+#Exposed -> Non-enclosed
+alpha_summary_18S_Pie$Mesh_status = gsub("Exposed", "Non-enclosed", alpha_summary_18S_Pie$Mesh_status)
+
+#Convert and reorder for plotting
+alpha_summary_18S_Pie$Sample_time = as.factor(as.character(alpha_summary_18S_Pie$Sample_time))
+alpha_summary_18S_Pie$Sample_time = factor(alpha_summary_18S_Pie$Sample_time,
+                         levels=c("7",
+                                  "14",
+                                  "19",
+                                  "28",
+                                  "42",
+                                  "56"))
+#Make plot
+Pielou_18S = ggplot(alpha_summary_18S_Pie, aes(x = Sample_time, y = Pielou, colour = Substrate, group = Substrate))+
+  geom_line(lwd=1)+
+  geom_errorbar(aes(ymin=(Pielou-se), 
+                    ymax=(Pielou+se),
+                    colour = Substrate), 
+                position=pd)+
+  facet_grid(. ~ Mesh_status)+
+  ylab("Pielou evenness")+
+  xlab("Time (days)")+
+  #ylim(0,1300)+
+  scale_color_manual("Substrate", values = Substrate_colour_list)+
+  scale_y_continuous(limits = c(0.3,1), breaks = c(0.5, 0.75, 1))+
+  theme_bw()+
+  My_Theme+
+  ggtitle("Eukaryotes")+
+  theme(plot.title = element_text(hjust = 0.5))
+
+#Inspect plot
+Pielou_18S
+
+```
+```{r Calculate means and sd}
+#Mean substrate
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(Substrate) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#Mean across development and enclsoure condition
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(StageofBiofilm, Mesh_status) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+#Calculate difference
+test_mean$mean_val[2]-test_mean$mean_val[1]
+test_mean$mean_val[4]-test_mean$mean_val[3]
+
+#Mean substarte and enclsoure condition
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(Substrate, Mesh_status) %>% 
+  dplyr::summarise(sum_val = sum(Pielou), mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#Mean across developmental phases
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(StageofBiofilm) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#SD decrease over developmental phases
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[2]/test_mean$mean_val[2])
+
+#Mean over time
+test_mean = Map_18S_alpha_noA %>% 
+  group_by(Sample_time) %>% 
+  dplyr::summarise(mean_val = mean(Pielou), sd = sd(Pielou))
+print(test_mean)
+
+#SD decrease over time
+(test_mean$sd[1]/test_mean$mean_val[1])-(test_mean$sd[6]/test_mean$mean_val[6])
+```
+#Figure 3 A & C statistics
+```{r Set up}
+Phyloseq_Biofilm_phyloseq_T12_noA = subset_samples(Phyloseq_Biofilm_16S_noA, StageofBiofilm == "Early")
+Phyloseq_Biofilm_phyloseq_T3456_noA = subset_samples(Phyloseq_Biofilm_16S_noA, StageofBiofilm == "Late")
+
+Phyloseq_Biofilm_phyloseq_T12_noA@sam_data
+Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data
+```
+```{r Whole community}
+Map_16S_alpha_noA_Open = subset(Map_16S_alpha_noA, Mesh_status == "Exposed")
+Map_16S_alpha_noA_Encl = subset(Map_16S_alpha_noA, Mesh_status == "Enclosed")
+
+####Developmental stage####
+wilcox.test(Map_16S_alpha_noA$Observed ~ Map_16S_alpha_noA$StageofBiofilm, p.adjust.method = "bonferroni")
+wilcox.test(Map_16S_alpha_noA$Pielou ~ Map_16S_alpha_noA$StageofBiofilm, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Sample time####
+kruskal.test(Map_16S_alpha_noA$Observed, Map_16S_alpha_noA$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA$Pielou, Map_16S_alpha_noA$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+kruskal.test(Map_16S_alpha_noA_Open$Observed, Map_16S_alpha_noA_Open$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA_Open$Pielou, Map_16S_alpha_noA_Open$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+kruskal.test(Map_16S_alpha_noA_Encl$Observed, Map_16S_alpha_noA_Encl$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA_Encl$Pielou, Map_16S_alpha_noA_Encl$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+
+####Substrate####
+kruskal.test(Map_16S_alpha_noA$Observed, Map_16S_alpha_noA$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA$Pielou, Map_16S_alpha_noA$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+kruskal.test(Map_16S_alpha_noA_Encl$Pielou, Map_16S_alpha_noA_Encl$Substrate, p.adjust.method = "bonferroni")
+
+#Enclosed
+kruskal.test(Map_16S_alpha_noA_Encl$Observed, Map_16S_alpha_noA_Encl$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA_Encl$Pielou, Map_16S_alpha_noA_Encl$Substrate, p.adjust.method = "bonferroni")
+
+#Non-enclosed
+kruskal.test(Map_16S_alpha_noA_Open$Observed, Map_16S_alpha_noA_Open$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA_Open$Pielou, Map_16S_alpha_noA_Open$Substrate, p.adjust.method = "bonferroni")
+
+####Mesh status####
+kruskal.test(Map_16S_alpha_noA$Observed, Map_16S_alpha_noA$Mesh_status, p.adjust.method = "bonferroni")
+kruskal.test(Map_16S_alpha_noA$Pielou, Map_16S_alpha_noA$Mesh_status, p.adjust.method = "bonferroni")
+#Significant correlation between Mesh status and alpha diversity
+```
+```{r Early}
+####Sample time####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Substrate####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+Phyloseq_Biofilm_phyloseq_T12_noA_expo = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Mesh_status == "Exposed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+
+Phyloseq_Biofilm_phyloseq_T12_noA_enclo = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Mesh_status == "Enclosed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+####Mesh status####
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni", conf.int = T)
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T12_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant correlation between Mesh status and alpha diversity
+
+Phyloseq_Biofilm_phyloseq_T12_noA_p = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Substrate == "Pine")
+Phyloseq_Biofilm_phyloseq_T12_noA_a = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Substrate == "Acryl")
+Phyloseq_Biofilm_phyloseq_T12_noA_g = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Substrate == "Glass")
+Phyloseq_Biofilm_phyloseq_T12_noA_t = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Substrate == "Tile")
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_p@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T12_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_a@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T12_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_g@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T12_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_t@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T12_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_p@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T12_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_a@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T12_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_g@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T12_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_t@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T12_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#No significant differences
+```
+```{r Late communties}
+####Sample time####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Substrate####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+Phyloseq_Biofilm_phyloseq_T3456_noA_expo = subset_samples(Phyloseq_Biofilm_phyloseq_T3456_noA, Mesh_status == "Exposed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T3456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+
+Phyloseq_Biofilm_phyloseq_T3456_noA_enclo = subset_samples(Phyloseq_Biofilm_phyloseq_T3456_noA, Mesh_status == "Enclosed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T3456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+####Mesh status####
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni", conf.int = T)
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T3456_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant correlation between Mesh status and alpha diversity
+
+Phyloseq_Biofilm_phyloseq_T3456_noA_p = subset_samples(Phyloseq_Biofilm_phyloseq_T3456_noA, Substrate == "Pine")
+Phyloseq_Biofilm_phyloseq_T3456_noA_a = subset_samples(Phyloseq_Biofilm_phyloseq_T3456_noA, Substrate == "Acryl")
+Phyloseq_Biofilm_phyloseq_T3456_noA_g = subset_samples(Phyloseq_Biofilm_phyloseq_T3456_noA, Substrate == "Glass")
+Phyloseq_Biofilm_phyloseq_T3456_noA_t = subset_samples(Phyloseq_Biofilm_phyloseq_T3456_noA, Substrate == "Tile")
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_p@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T3456_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant differences
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_a@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T3456_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_g@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T3456_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_t@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T3456_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_p@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T3456_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#No significant differences
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_a@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T3456_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_g@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T3456_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T3456_noA_t@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T3456_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+
+```
+```{r Spearman and post-hoc}
+
+Phyloseq_Biofilm_16S_noA = subset_samples(Phyloseq_Biofilm_16S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+cor.test(as.numeric(as.character(Phyloseq_Biofilm_16S_noA@sam_data$Observed)), as.numeric(as.character(Phyloseq_Biofilm_16S_noA@sam_data$Sample_time)), method = "s")
+cor.test(as.numeric(as.character(Phyloseq_Biofilm_16S_noA@sam_data$Pielou)), as.numeric(as.character(Phyloseq_Biofilm_16S_noA@sam_data$Sample_time)), method = "s")
+#Significant correlation between all and Sample_time type
+
+
+####Sample stage####
+wilcox.test(Phyloseq_Biofilm_16S_noA@sam_data$Observed ~ Phyloseq_Biofilm_16S_noA@sam_data$StageofBiofilm, p.adjust.method = "bonferroni")
+cor.test(as.numeric(as.character(Phyloseq_Biofilm_16S_noA@sam_data$Pielou)), as.numeric(as.character(Phyloseq_Biofilm_16S_noA@sam_data$Sample_time)), method = "s")
+
+####Sample time####
+pairwise.wilcox.test(Map_16S_alpha_noA$Observed, Map_16S_alpha_noA$Sample_time, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_16S_noA@sam_data$Pielou, Phyloseq_Biofilm_16S_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Substrate####
+pairwise.wilcox.test(Phyloseq_Biofilm_16S_noA@sam_data$Observed, Phyloseq_Biofilm_16S_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_16S_noA@sam_data$Pielou, Phyloseq_Biofilm_16S_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+#Substrate with mesh status
+Phyloseq_Biofilm_phyloseq_T12_noA_encl = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Mesh_status == "Enclosed")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_encl @sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA_encl @sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_encl @sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA_encl@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+Phyloseq_Biofilm_phyloseq_T12_noA_expo = subset_samples(Phyloseq_Biofilm_phyloseq_T12_noA, Mesh_status == "Exposed")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T12_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+```
+
+#Figure 3 B & D statistics
+```{r Set up}
+Phyloseq_Biofilm_phyloseq_T1_noA = subset_samples(Phyloseq_Biofilm_18S_noA, StageofBiofilm == "Early")
+Phyloseq_Biofilm_phyloseq_T23456_noA = subset_samples(Phyloseq_Biofilm_18S_noA, StageofBiofilm == "Late")
+
+Phyloseq_Biofilm_phyloseq_T1_noA@sam_data
+Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data
+```
+```{r Whole community}
+Map_18S_alpha_noA_Open = subset(Map_18S_alpha_noA, Mesh_status == "Exposed")
+Map_18S_alpha_noA_Encl = subset(Map_18S_alpha_noA, Mesh_status == "Enclosed")
+
+####Developmental stage####
+wilcox.test(Map_18S_alpha_noA$Observed ~ Map_18S_alpha_noA$StageofBiofilm, p.adjust.method = "bonferroni")
+wilcox.test(Map_18S_alpha_noA$Pielou ~ Map_18S_alpha_noA$StageofBiofilm, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Sample time####
+kruskal.test(Map_18S_alpha_noA$Observed, Map_18S_alpha_noA$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Map_18S_alpha_noA$Pielou, Map_18S_alpha_noA$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+kruskal.test(Map_18S_alpha_noA_Open$Observed, Map_18S_alpha_noA_Open$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Map_18S_alpha_noA_Open$Pielou, Map_18S_alpha_noA_Open$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+kruskal.test(Map_18S_alpha_noA_Encl$Observed, Map_18S_alpha_noA_Encl$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Map_18S_alpha_noA_Encl$Pielou, Map_18S_alpha_noA_Encl$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+
+####Substrate####
+kruskal.test(Map_18S_alpha_noA$Observed, Map_18S_alpha_noA$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Map_18S_alpha_noA$Pielou, Map_18S_alpha_noA$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+kruskal.test(Map_18S_alpha_noA_Encl$Pielou, Map_18S_alpha_noA_Encl$Substrate, p.adjust.method = "bonferroni")
+
+####Mesh status####
+kruskal.test(Map_18S_alpha_noA$Observed, Map_18S_alpha_noA$Mesh_status, p.adjust.method = "bonferroni")
+kruskal.test(Map_18S_alpha_noA$Pielou, Map_18S_alpha_noA$Mesh_status, p.adjust.method = "bonferroni")
+#Significant correlation between Mesh status and alpha diversity
+```
+```{r Early communities}
+####Sample time####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Substrate####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+Phyloseq_Biofilm_phyloseq_T1_noA_expo = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Mesh_status == "Exposed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+
+Phyloseq_Biofilm_phyloseq_T1_noA_enclo = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Mesh_status == "Enclosed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+####Mesh status####
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni", conf.int = T)
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T1_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant correlation between Mesh status and alpha diversity
+
+Phyloseq_Biofilm_phyloseq_T1_noA_p = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Substrate == "Pine")
+Phyloseq_Biofilm_phyloseq_T1_noA_a = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Substrate == "Acryl")
+Phyloseq_Biofilm_phyloseq_T1_noA_g = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Substrate == "Glass")
+Phyloseq_Biofilm_phyloseq_T1_noA_t = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Substrate == "Tile")
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_p@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T1_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_a@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T1_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_g@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T1_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_t@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T1_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_p@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T1_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_a@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T1_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_g@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T1_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_t@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T1_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#No significant differences
+```
+```{r Late communties}
+####Sample time####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Substrate####
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+Phyloseq_Biofilm_phyloseq_T23456_noA_expo = subset_samples(Phyloseq_Biofilm_phyloseq_T23456_noA, Mesh_status == "Exposed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T23456_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+
+Phyloseq_Biofilm_phyloseq_T23456_noA_enclo = subset_samples(Phyloseq_Biofilm_phyloseq_T23456_noA, Mesh_status == "Enclosed")
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+kruskal.test(Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T23456_noA_enclo@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+####Mesh status####
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni", conf.int = T)
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T23456_noA@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant correlation between Mesh status and alpha diversity
+
+Phyloseq_Biofilm_phyloseq_T23456_noA_p = subset_samples(Phyloseq_Biofilm_phyloseq_T23456_noA, Substrate == "Pine")
+Phyloseq_Biofilm_phyloseq_T23456_noA_a = subset_samples(Phyloseq_Biofilm_phyloseq_T23456_noA, Substrate == "Acryl")
+Phyloseq_Biofilm_phyloseq_T23456_noA_g = subset_samples(Phyloseq_Biofilm_phyloseq_T23456_noA, Substrate == "Glass")
+Phyloseq_Biofilm_phyloseq_T23456_noA_t = subset_samples(Phyloseq_Biofilm_phyloseq_T23456_noA, Substrate == "Tile")
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_p@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T23456_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant differences
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_a@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T23456_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_g@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T23456_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_t@sam_data$Observed ~ Phyloseq_Biofilm_phyloseq_T23456_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_p@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T23456_noA_p@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#No significant differences
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_a@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T23456_noA_a@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_g@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T23456_noA_g@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+wilcox.test(Phyloseq_Biofilm_phyloseq_T23456_noA_t@sam_data$Pielou ~ Phyloseq_Biofilm_phyloseq_T23456_noA_t@sam_data$Mesh_status, p.adjust.method = "bonferroni")
+#Significant
+
+```
+```{r Spearman and post-hoc}
+
+Phyloseq_Biofilm_18S_noA = subset_samples(Phyloseq_Biofilm_18S, Project == "Marine_Biofilm" & Sample_type == "Biofilm" & !Substrate == "Water"& !Substrate == "Mesh")
+
+cor.test(as.numeric(as.character(Phyloseq_Biofilm_18S_noA@sam_data$Observed)), as.numeric(as.character(Phyloseq_Biofilm_18S_noA@sam_data$Sample_time)), method = "s")
+cor.test(as.numeric(as.character(Phyloseq_Biofilm_18S_noA@sam_data$Pielou)), as.numeric(as.character(Phyloseq_Biofilm_18S_noA@sam_data$Sample_time)), method = "s")
+#Significant correlation between all and Sample_time type
+
+
+####Sample stage####
+wilcox.test(Phyloseq_Biofilm_18S_noA@sam_data$Observed ~ Phyloseq_Biofilm_18S_noA@sam_data$StageofBiofilm, p.adjust.method = "bonferroni")
+cor.test(as.numeric(as.character(Phyloseq_Biofilm_18S_noA@sam_data$Pielou)), as.numeric(as.character(Phyloseq_Biofilm_18S_noA@sam_data$Sample_time)), method = "s")
+
+####Sample time####
+pairwise.wilcox.test(Map_18S_alpha_noA$Observed, Map_18S_alpha_noA$Sample_time, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_18S_noA@sam_data$Pielou, Phyloseq_Biofilm_18S_noA@sam_data$Sample_time, p.adjust.method = "bonferroni")
+#Significant correlation between all and Sample_time type
+
+####Substrate####
+pairwise.wilcox.test(Phyloseq_Biofilm_18S_noA@sam_data$Observed, Phyloseq_Biofilm_18S_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_18S_noA@sam_data$Pielou, Phyloseq_Biofilm_18S_noA@sam_data$Substrate, p.adjust.method = "bonferroni")
+#Significant correlation between evenness and substrate type - interesting
+
+#Substrate with mesh status
+Phyloseq_Biofilm_phyloseq_T1_noA_encl = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Mesh_status == "Enclosed")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_encl @sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA_encl @sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_encl @sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA_encl@sam_data$Substrate, p.adjust.method = "bonferroni")
+
+Phyloseq_Biofilm_phyloseq_T1_noA_expo = subset_samples(Phyloseq_Biofilm_phyloseq_T1_noA, Mesh_status == "Exposed")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Observed, Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+pairwise.wilcox.test(Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Pielou, Phyloseq_Biofilm_phyloseq_T1_noA_expo@sam_data$Substrate, p.adjust.method = "bonferroni")
+```
+
+#Combine everything into one figure
+```{r}
+
+#Make diveristy component
+Figure3 = ggarrange(Observed_16S,
+                      Observed_18S,
+                Pielou_16S,
+                Pielou_18S,
+                      common.legend = T,
+                      legend = "right",
+                      nrow = 2,
+                ncol = 2,
+                      labels = c("AUTO"),
+                align = "hv")
+
+#Inspect
+Figure3
+
+#Save plot
+pdf("~/Desktop/Biofilm_project/Analysis/Clean_Thesis_Code/Figures/Figure3_AlphaDiversity.pdf", width = 16, height = 10)
+Figure3
+dev.off()
+
+```
+
+
+
+
+
